@@ -1,0 +1,14 @@
+.DS_Store
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local API/cache/run outputs
+cache/
+response
+inference_results/
+data/inference_runs/
+
+# Model evaluation plots are not required for alpha inference runtime.
+forecaster/models/default_model/evaluations/
