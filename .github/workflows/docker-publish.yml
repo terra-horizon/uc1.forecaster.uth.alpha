@@ -37,7 +37,7 @@ jobs:
           tags: |
             type=ref,event=tag
           labels: |
-            org.opencontainers.image.source=https://github.com/terra-horizon/uc1.forecaster.uth.alpha1
+            org.opencontainers.image.source=https://github.com/terra-horizon/uc1.forecaster.uth.alpha
 
       - name: Build and push Docker image
         id: push

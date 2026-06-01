@@ -152,7 +152,7 @@ git push origin v1.0.0
 The image is published as:
 
 ```text
-ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<tag>
+ghcr.io/terra-horizon/uc1.forecaster.uth.alpha:<tag>
 ```
 
 ---
@@ -166,7 +166,7 @@ This repository includes `.github/workflows/vulnerability-scan-on-demand.yml`. R
 The workflow first tries to scan the published image:
 
 ```text
-ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<image_tag>
+ghcr.io/terra-horizon/uc1.forecaster.uth.alpha:<image_tag>
 ```
 
 If that tag has not been published to GHCR yet, the workflow builds the image from the current checkout and scans the local workflow image instead.
@@ -196,7 +196,7 @@ mkdocs serve -f docs/mkdocs.yml
 The on-demand documentation deployment workflow publishes to:
 
 ```text
-https://terra-horizon.github.io/uc1.forecaster.uth.alpha1/
+https://terra-horizon.github.io/uc1.forecaster.uth.alpha/
 ```
 
 This setup keeps documentation changes inside this UC1 repository. The central `terra-horizon.github.io` portal is not modified by this repository.

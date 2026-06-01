@@ -32,7 +32,7 @@ git push origin v1.0.0
 The resulting image is published to:
 
 ```text
-ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<tag>
+ghcr.io/terra-horizon/uc1.forecaster.uth.alpha:<tag>
 ```
 
 ## Vulnerability Scan
