@@ -33,8 +33,8 @@ UC1_REMOVE_CONTAINER=1 UC1_DOCKER_ARGS="--entrypoint sh" ./scripts/docker-run.sh
 The repository includes an on-demand Trivy workflow that scans:
 
 * Dockerfile and infrastructure configuration;
-* the published GHCR image for operating system and library vulnerabilities.
+* the published GHCR image for operating system and library vulnerabilities, or a local workflow-built image when the requested tag is not published yet.
 
-The workflow uploads SARIF reports to GitHub Code Scanning.
+The workflow always uploads SARIF reports as workflow artifacts. It also uploads to GitHub Code Scanning when the repository has the required security features enabled.
 
 Local scan reports should be stored under `local_scans/`; the directory is ignored by Git.

@@ -37,7 +37,7 @@ ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<tag>
 
 ## Vulnerability Scan
 
-After an image is published, run `Vulnerability Scan (On-Demand)` from GitHub Actions and provide the same tag in the `image_tag` input. The workflow scans both the repository Docker configuration and the published image, then uploads SARIF results to GitHub Code Scanning.
+Run `Vulnerability Scan (On-Demand)` from GitHub Actions and provide a tag in the `image_tag` input. The workflow scans the repository Docker configuration and then tries to scan the published GHCR image for that tag. If the published image is not available, it builds the image from the workflow checkout and scans that local image instead.
 
 Local scan reports should be written under `local_scans/`, which is ignored by Git.
 

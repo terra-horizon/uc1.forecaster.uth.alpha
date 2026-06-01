@@ -161,14 +161,22 @@ ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<tag>
 
 The reusable vulnerability scan pattern was verified in `terra-aai` and `terra-app-api`; it is not part of `terra-logging`.
 
-This repository includes `.github/workflows/vulnerability-scan-on-demand.yml`. Run it manually from GitHub Actions after the Docker image has been published, using the same tag as `image_tag` such as `v1.0.0`.
+This repository includes `.github/workflows/vulnerability-scan-on-demand.yml`. Run it manually from GitHub Actions using an image tag such as `v1.0.0`.
+
+The workflow first tries to scan the published image:
+
+```text
+ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<image_tag>
+```
+
+If that tag has not been published to GHCR yet, the workflow builds the image from the current checkout and scans the local workflow image instead.
 
 The workflow scans:
 
 - the repository Docker configuration with Trivy config scanning;
 - the published GHCR image with Trivy image scanning for `CRITICAL` and `HIGH` operating system and library vulnerabilities.
 
-Results are uploaded as SARIF to GitHub Code Scanning.
+Results are always uploaded as workflow artifacts. They are also uploaded to GitHub Code Scanning when repository security settings allow it. Private repositories may require GitHub Advanced Security for Code Scanning ingestion.
 
 For local scan runs, store generated reports under `local_scans/`. That directory is ignored by Git so local SARIF/table outputs do not get committed.
 
