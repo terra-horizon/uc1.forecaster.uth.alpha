@@ -1,0 +1,54 @@
+site_name: TERRA UC1 Forecaster
+
+site_url: https://terra-horizon.github.io/uc1.forecaster.uth.alpha1/
+repo_url: https://github.com/terra-horizon/uc1.forecaster.uth.alpha1/
+
+nav:
+  - Overview: index.md
+  - System:
+    - Architecture: architecture.md
+  - Setup & Monitoring:
+    - Deployment: deployment.md
+    - Configuration: configuration.md
+  - Material:
+    - Quality Assurance: qa.md
+    - FAQ & Known Issues: faq.md
+  - License: license.md
+  - Home: https://terra-horizon.github.io/
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.path
+    - navigation.top
+
+plugins:
+  - search
+  - mike
+  - neoteroi.mkdocsoad:
+      use_pymdownx: true
+
+markdown_extensions:
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+extra:
+  version:
+    provider: mike
+    alias: true
+    default: latest
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/terra-horizon
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/horizon_terra
+    - icon: fontawesome/brands/youtube
+      link: https://www.youtube.com/@TERRAHORIZON
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/terra-horizon

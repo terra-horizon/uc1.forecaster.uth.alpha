@@ -1,15 +1,17 @@
 .DS_Store
 .env
+.git
+.github
+.pytest_cache
 __pycache__/
 *.py[cod]
-.pytest_cache/
 
-# Local API/cache/run outputs
 cache/
 response
 inference_results/
 data/inference_runs/
-local_scans/
-
-# Model evaluation plots are not required for alpha inference runtime.
 forecaster/models/default_model/evaluations/
+
+Dockerfile
+docs/
+tests/

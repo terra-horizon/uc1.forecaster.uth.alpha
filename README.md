@@ -69,3 +69,126 @@ python forecast.py \
 ```
 
 Target-date imagery is requested for the exact anchor date only. If Sentinel-2 or Sentinel-3 imagery is not available on that date, the run records `status: unavailable` and `actual_date: "N/A"` in `inference_plan.json` instead of silently falling back to another date.
+
+---
+
+## Runtime Configuration
+
+The forecaster reads CDSE credentials from environment variables. Do not commit credentials to this repository.
+
+Required:
+
+```text
+CDSE_CLIENT_ID
+CDSE_CLIENT_SECRET
+```
+
+Optional backup credentials are also supported:
+
+```text
+CDSE_BACKUP_CLIENT_ID
+CDSE_BACKUP_CLIENT_SECRET
+CDSE_BACKUP_2_CLIENT_ID
+CDSE_BACKUP_2_CLIENT_SECRET
+```
+
+For local development, place credentials in a repository-root `.env` file. The file is ignored by Git and excluded from the Docker build context.
+
+---
+
+## Docker Usage
+
+Build the local image:
+
+```bash
+docker build -t uc1-forecaster:local .
+```
+
+Show the CLI help:
+
+```bash
+./scripts/docker-run.sh --help
+```
+
+Run inference with credentials from `.env` and write outputs to a mounted host directory:
+
+```bash
+./scripts/docker-run.sh \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --target-date 2026-05-27 \
+  --run-name sperchios_test_run \
+  --output-root /app/inference_results
+```
+
+The image runs as a non-root user and uses `forecast.py` as its entrypoint.
+
+The helper script assigns a container name automatically with the format `uc1-forecaster-YYYYMMDD-HHMMSS`, mounts `inference_results/` to `/app/inference_results`, and passes `.env` when the file exists. By default, the stopped container remains visible in Docker Desktop with that generated name. Set `UC1_REMOVE_CONTAINER=1` when you want Docker to remove it automatically after the run.
+
+Override the defaults when needed:
+
+```bash
+UC1_CONTAINER_NAME=uc1-forecaster-20260602 UC1_IMAGE_NAME=uc1-forecaster:local ./scripts/docker-run.sh --help
+```
+
+Run with automatic cleanup:
+
+```bash
+UC1_REMOVE_CONTAINER=1 ./scripts/docker-run.sh --help
+```
+
+---
+
+## Container Publishing
+
+The repository includes `.github/workflows/docker-publish.yml`, following the TERRA GHCR publishing pattern.
+
+The workflow runs when a tag matching `v*` is pushed:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The image is published as:
+
+```text
+ghcr.io/terra-horizon/uc1.forecaster.uth.alpha1:<tag>
+```
+
+---
+
+## Vulnerability Scanning
+
+The reusable vulnerability scan pattern was verified in `terra-aai` and `terra-app-api`; it is not part of `terra-logging`.
+
+This repository includes `.github/workflows/vulnerability-scan-on-demand.yml`. Run it manually from GitHub Actions after the Docker image has been published, using the same tag as `image_tag` such as `v1.0.0`.
+
+The workflow scans:
+
+- the repository Docker configuration with Trivy config scanning;
+- the published GHCR image with Trivy image scanning for `CRITICAL` and `HIGH` operating system and library vulnerabilities.
+
+Results are uploaded as SARIF to GitHub Code Scanning.
+
+For local scan runs, store generated reports under `local_scans/`. That directory is ignored by Git so local SARIF/table outputs do not get committed.
+
+---
+
+## Documentation
+
+UC1 component documentation lives under `docs/` and is configured with MkDocs, Mike, and the Material theme.
+
+Run a local docs preview from the repository root:
+
+```bash
+pip install mkdocs mkdocs-material mike neoteroi-mkdocs pymdown-extensions
+mkdocs serve -f docs/mkdocs.yml
+```
+
+The on-demand documentation deployment workflow publishes to:
+
+```text
+https://terra-horizon.github.io/uc1.forecaster.uth.alpha1/
+```
+
+This setup keeps documentation changes inside this UC1 repository. The central `terra-horizon.github.io` portal is not modified by this repository.

@@ -41,15 +41,14 @@ def _get_optional_env(*var_names: str) -> str | None:
     return None
 
 
-CLIENT_ID = _get_required_env("CDSE_CLIENT_ID")
-CLIENT_SECRET = _get_required_env("CDSE_CLIENT_SECRET")
-
 def get_credential_sets() -> list[dict[str, str]]:
+    client_id = _get_required_env("CDSE_CLIENT_ID")
+    client_secret = _get_required_env("CDSE_CLIENT_SECRET")
     credentials = [
         {
             "label": "primary",
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
         }
     ]
     
