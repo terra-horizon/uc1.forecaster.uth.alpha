@@ -30,3 +30,31 @@
 .footer-social-icons a:hover {
   color: #007bff;
 }
+
+.md-header__button.md-logo,
+.md-nav__button.md-logo {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+}
+
+.md-header__button.md-logo img {
+  width: 7.5rem;
+  height: auto;
+  max-height: 2rem;
+  object-fit: contain;
+}
+
+.md-nav__button.md-logo img {
+  width: 8rem;
+  height: auto;
+  max-height: 2.25rem;
+  object-fit: contain;
+}
+
+@media screen and (max-width: 30rem) {
+  .md-header__button.md-logo img {
+    width: 5.5rem;
+    max-height: 1.6rem;
+  }
+}
