@@ -20,27 +20,3 @@ docker build -t uc1-forecaster:local .
 
 The helper script names containers as `uc1-forecaster-YYYYMMDD-HHMMSS`, mounts `inference_results/`, and passes `.env` when present. The stopped container remains visible in Docker Desktop by default; set `UC1_REMOVE_CONTAINER=1` for automatic cleanup. Set `UC1_CONTAINER_NAME`, `UC1_IMAGE_NAME`, or `UC1_OUTPUT_DIR` to override the other defaults.
 
-## Image Publishing
-
-The `Build and Push Docker Image` workflow runs when a tag matching `v*` is pushed.
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The resulting image is published to:
-
-```text
-ghcr.io/terra-horizon/uc1.forecaster.uth.alpha:<tag>
-```
-
-## Vulnerability Scan
-
-Run `Vulnerability Scan (On-Demand)` from GitHub Actions and provide a tag in the `image_tag` input. The workflow scans the repository Docker configuration and then tries to scan the published GHCR image for that tag. If the published image is not available, it builds the image from the workflow checkout and scans that local image instead.
-
-Local scan reports should be written under `local_scans/`, which is ignored by Git.
-
-## Documentation Publishing
-
-The `Deploy Docs (On-Demand)` workflow publishes this documentation through Mike. Provide a documentation version such as `v1.0.0` when running the workflow.
