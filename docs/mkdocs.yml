@@ -18,11 +18,18 @@ nav:
 
 theme:
   name: material
+  favicon: images/favicon.ico
+  logo: images/TERRA_Logo_Header.png
   icon:
     repo: fontawesome/brands/github
+  custom_dir: overrides
   features:
     - navigation.path
     - navigation.top
+
+extra_css:
+  - stylesheets/custom-footer.css
+  - stylesheets/mkdocsoad.css
 
 plugins:
   - search
