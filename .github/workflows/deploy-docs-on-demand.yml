@@ -31,6 +31,9 @@ jobs:
         run: |
           pip install mkdocs mkdocs-material mike neoteroi-mkdocs pymdown-extensions
 
+      - name: Validate docs
+        run: mkdocs build --strict --config-file mkdocs.yml
+
       - name: Configure git
         run: |
           git config user.name "terra-ci[bot]"
