@@ -31,8 +31,7 @@
   color: #007bff;
 }
 
-.md-header__button.md-logo,
-.md-nav__button.md-logo {
+.md-header__button.md-logo {
   display: inline-flex;
   align-items: center;
   padding: 0;
@@ -45,11 +44,8 @@
   object-fit: contain;
 }
 
-.md-nav__button.md-logo img {
-  width: 8rem;
-  height: auto;
-  max-height: 2.25rem;
-  object-fit: contain;
+.md-nav__button.md-logo {
+  display: none;
 }
 
 @media screen and (max-width: 30rem) {
