@@ -487,39 +487,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#image-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#vulnerability-scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Vulnerability Scan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Documentation Publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -776,39 +743,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#image-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#vulnerability-scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Vulnerability Scan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Documentation Publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -890,19 +824,6 @@
 <span class="w">  </span>--output-root<span class="w"> </span>/app/inference_results
 </code></pre></div>
 <p>The helper script names containers as <code>uc1-forecaster-YYYYMMDD-HHMMSS</code>, mounts <code>inference_results/</code>, and passes <code>.env</code> when present. The stopped container remains visible in Docker Desktop by default; set <code>UC1_REMOVE_CONTAINER=1</code> for automatic cleanup. Set <code>UC1_CONTAINER_NAME</code>, <code>UC1_IMAGE_NAME</code>, or <code>UC1_OUTPUT_DIR</code> to override the other defaults.</p>
-<h2 id="image-publishing">Image Publishing<a class="headerlink" href="#image-publishing" title="Permanent link">&para;</a></h2>
-<p>The <code>Build and Push Docker Image</code> workflow runs when a tag matching <code>v*</code> is pushed.</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>tag<span class="w"> </span>v1.0.0
-git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v1.0.0
-</code></pre></div>
-<p>The resulting image is published to:</p>
-<div class="highlight"><pre><span></span><code>ghcr.io/terra-horizon/uc1.forecaster.uth.alpha:&lt;tag&gt;
-</code></pre></div>
-<h2 id="vulnerability-scan">Vulnerability Scan<a class="headerlink" href="#vulnerability-scan" title="Permanent link">&para;</a></h2>
-<p>Run <code>Vulnerability Scan (On-Demand)</code> from GitHub Actions and provide a tag in the <code>image_tag</code> input. The workflow scans the repository Docker configuration and then tries to scan the published GHCR image for that tag. If the published image is not available, it builds the image from the workflow checkout and scans that local image instead.</p>
-<p>Local scan reports should be written under <code>local_scans/</code>, which is ignored by Git.</p>
-<h2 id="documentation-publishing">Documentation Publishing<a class="headerlink" href="#documentation-publishing" title="Permanent link">&para;</a></h2>
-<p>The <code>Deploy Docs (On-Demand)</code> workflow publishes this documentation through Mike. Provide a documentation version such as <code>v1.0.0</code> when running the workflow.</p>
 
 
 
