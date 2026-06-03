@@ -30,6 +30,7 @@ theme:
 extra_css:
   - stylesheets/custom-footer.css
   - stylesheets/mkdocsoad.css
+  - stylesheets/header-logo.css
 
 plugins:
   - search
