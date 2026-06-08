@@ -36,7 +36,7 @@ class HorizonWeightedLoss(tf.keras.losses.Loss):
 from forecaster.data.collectors.sentinel2 import ImageCollection
 from forecaster.data.collectors.sentinel2 import StatisticalCollection
 from forecaster.data.data_augmentation_5d_v2 import DataAugmentation
-from forecaster.models.multi_feature_model_v15 import HorizonVelocityScale
+from forecaster.models.multi_feature_model_v15 import HorizonVelocityScale, build_model
 from forecaster.water_tile_selector import WaterTileSelector, print_selection_summary
 
 
@@ -47,6 +47,19 @@ DEFAULT_MODEL_ROOT = REPO_ROOT / "forecaster" / "models" / "default_model"
 
 DEFAULT_IMAGE_KEYS = ("true_color", "chla", "cdom", "turb", "doc", "cya", "surface_temperature")
 DEFAULT_FEATURE_CSV_NAME = "5D_mean_metrics_interpolated_time_based.csv"
+
+
+class PipelineExecutionError(RuntimeError):
+    """Expected pipeline failure with a stable machine-readable code."""
+
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details or {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"code": self.code, "message": self.message, "details": self.details}
 
 
 @dataclass(frozen=True)
@@ -106,92 +119,235 @@ class AOIInferencePipeline:
         self.tiles_geojson_path = self.run_dir / "river_tiles.geojson"
         self.water_manifest_path = self.run_dir / "water_selection.json"
         self.plan_path = self.run_dir / "inference_plan.json"
+        self.result_path = self.run_dir / "pipeline_result.json"
 
     def execute(self) -> dict[str, Any]:
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.validate_image_keys()
+        result = self._base_result()
+        try:
+            self.validate_image_keys()
+            result["stages"]["validation"] = {"status": "success"}
 
-        extractor = RiverTileExtractor(
-            RiverTileExtractorConfig(
-                aoi_bbox=list(self.config.aoi_bbox),
-                projected_crs=self.config.projected_crs,
-                spacing_m=self.config.spacing_m,
-                box_size_m=self.config.box_size_m,
-                min_length_m=self.config.min_river_length_m,
+            extractor = RiverTileExtractor(
+                RiverTileExtractorConfig(
+                    aoi_bbox=list(self.config.aoi_bbox),
+                    projected_crs=self.config.projected_crs,
+                    spacing_m=self.config.spacing_m,
+                    box_size_m=self.config.box_size_m,
+                    min_length_m=self.config.min_river_length_m,
+                )
             )
-        )
-        tiles, _ = extractor.extract_to_geojson(self.tiles_geojson_path)
+            tiles, _ = extractor.extract_to_geojson(self.tiles_geojson_path)
+            result["stages"]["river_tiles"] = {"status": "success", "tile_count": len(tiles)}
+            if not tiles:
+                result["stages"]["river_tiles"]["status"] = "failed"
+                raise PipelineExecutionError(
+                    "NO_RIVER_TILES",
+                    "The AOI contains no qualifying river tiles.",
+                    {"aoi_bbox": list(self.config.aoi_bbox)},
+                )
 
-        water_start, water_end = self.water_check_interval()
-        selector = WaterTileSelector(
-            geojson_path=self.tiles_geojson_path,
-            cache_path=self.water_manifest_path,
-            water_check_interval=(water_start, water_end),
-            reference_last_n=0,
-            threshold=self.config.water_threshold,
-            min_auto_threshold_pct=self.config.water_min_auto_threshold_pct,
-            refresh=self.config.refresh_water,
-        )
-        water_manifest = selector.select_tiles()
-        print_selection_summary(water_manifest)
-
-        selected_records = [
-            record
-            for record in water_manifest.get("tiles", [])
-            if record.get("name") in set(water_manifest.get("selected_tiles", []))
-        ]
-        image_downloads = self.download_target_date_images(selected_records) if self.config.download_images else {}
-        history_start, history_end = self.required_history_interval()
-        feature_csvs: dict[str, str] = {}
-        forecast_payload: dict[str, Any] | None = None
-        if self.config.run_inference:
-            feature_csvs = self.prepare_feature_csvs(selected_records, history_start, history_end)
-            forecast_payload = self.run_model_inference(
-                selected_records=selected_records,
-                feature_csvs=feature_csvs,
-                water_manifest=water_manifest,
+            water_start, water_end = self.water_check_interval()
+            selector = WaterTileSelector(
+                geojson_path=self.tiles_geojson_path,
+                cache_path=self.water_manifest_path,
+                water_check_interval=(water_start, water_end),
+                reference_last_n=0,
+                threshold=self.config.water_threshold,
+                min_auto_threshold_pct=self.config.water_min_auto_threshold_pct,
+                refresh=self.config.refresh_water,
             )
-        plan = {
+            water_manifest = selector.select_tiles()
+            print_selection_summary(water_manifest)
+
+            selected_records = [
+                record
+                for record in water_manifest.get("tiles", [])
+                if record.get("name") in set(water_manifest.get("selected_tiles", []))
+            ]
+            result["stages"]["water_selection"] = {
+                "status": "success",
+                "selected_tile_count": len(selected_records),
+            }
+            if not selected_records:
+                result["stages"]["water_selection"]["status"] = "failed"
+                raise PipelineExecutionError(
+                    "NO_WATER_TILES",
+                    "River tiles were found, but none passed water selection.",
+                    {"tile_count": len(tiles)},
+                )
+
+            image_downloads = self.download_target_date_images(selected_records) if self.config.download_images else {}
+            unavailable_images = self._unavailable_images(image_downloads)
+            result["stages"]["target_date_images"] = {
+                "status": "warning" if unavailable_images else "success",
+                "unavailable": unavailable_images,
+            }
+            if unavailable_images:
+                result["warnings"].append(
+                    {
+                        "code": "TARGET_IMAGES_UNAVAILABLE",
+                        "message": "One or more exact target-date images are unavailable.",
+                        "details": {"images": unavailable_images},
+                    }
+                )
+
+            history_start, history_end = self.required_history_interval()
+            feature_csvs: dict[str, str] = {}
+            forecast_payload: dict[str, Any] | None = None
+            selected_names = [str(record["name"]) for record in selected_records]
+            if self.config.run_inference:
+                feature_csvs = self.prepare_feature_csvs(selected_records, history_start, history_end)
+                missing_feature_tiles = sorted(set(selected_names) - set(feature_csvs))
+                for tile_name in missing_feature_tiles:
+                    result["tiles"][tile_name] = {
+                        "status": "failed",
+                        "errors": [{"code": "NO_SATELLITE_DATA", "message": "No sufficient historical satellite data."}],
+                    }
+                result["stages"]["feature_preparation"] = {
+                    "status": "partial" if missing_feature_tiles and feature_csvs else "success",
+                    "prepared_tiles": sorted(feature_csvs),
+                    "missing_tiles": missing_feature_tiles,
+                }
+                if not feature_csvs:
+                    result["stages"]["feature_preparation"]["status"] = "failed"
+                    raise PipelineExecutionError(
+                        "NO_SATELLITE_DATA",
+                        "No selected tile has sufficient historical satellite data for inference.",
+                        {"tiles": selected_names},
+                    )
+
+                forecast_payload = self.run_model_inference(
+                    selected_records=selected_records,
+                    feature_csvs=feature_csvs,
+                    water_manifest=water_manifest,
+                )
+                successful_forecasts = [
+                    tile_name
+                    for tile_name, payload in forecast_payload.get("tiles", {}).items()
+                    if "error" not in payload
+                ]
+                failed_forecasts = {
+                    tile_name: payload.get("error", "Unknown inference failure.")
+                    for tile_name, payload in forecast_payload.get("tiles", {}).items()
+                    if "error" in payload
+                }
+                for tile_name in successful_forecasts:
+                    result["tiles"][tile_name] = {"status": "success", "forecast": "available"}
+                for tile_name, message in failed_forecasts.items():
+                    result["tiles"][tile_name] = {
+                        "status": "failed",
+                        "errors": [{"code": "INFERENCE_FAILED", "message": message}],
+                    }
+                result["stages"]["inference"] = {
+                    "status": "partial" if failed_forecasts and successful_forecasts else "success",
+                    "successful_tiles": successful_forecasts,
+                    "failed_tiles": sorted(failed_forecasts),
+                }
+                if not successful_forecasts:
+                    result["stages"]["inference"]["status"] = "failed"
+                    raise PipelineExecutionError(
+                        "INFERENCE_FAILED",
+                        "Model inference failed for every prepared tile.",
+                        {"tiles": failed_forecasts},
+                    )
+
+            plan = {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "aoi_bbox": list(self.config.aoi_bbox),
+                "target_date": self.config.target_date,
+                "run_dir": str(self.run_dir),
+                "tiles_geojson": str(self.tiles_geojson_path),
+                "water_manifest": str(self.water_manifest_path),
+                "pipeline_result": str(self.result_path),
+                "tile_count": len(tiles),
+                "selected_water_tile_count": len(selected_records),
+                "selected_tiles": selected_names,
+                "selected_tile_records": selected_records,
+                "history_interval": {
+                    "start_date": history_start,
+                    "end_date": history_end,
+                    "cadence_days": self.config.model_profile.cadence_days,
+                    "time_steps": self.config.model_profile.time_steps,
+                },
+                "water_check_interval": {
+                    "start_date": water_start,
+                    "end_date": water_end,
+                    "threshold": self.config.water_threshold,
+                },
+                "target_date_images": {
+                    "enabled": self.config.download_images,
+                    "date": self.config.target_date,
+                    "keys": list(self.config.image_keys),
+                    "downloads": image_downloads,
+                },
+                "inference": {
+                    "enabled": self.config.run_inference,
+                    "model_root": str(self.config.model_root),
+                    "feature_csvs": feature_csvs,
+                    "forecast_json": forecast_payload.get("forecast_json") if forecast_payload else None,
+                    "forecast_csv": forecast_payload.get("forecast_csv") if forecast_payload else None,
+                    "plot_dir": forecast_payload.get("plot_dir") if forecast_payload else None,
+                },
+                "model_profile": asdict(self.config.model_profile),
+            }
+            self.plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            result["artifacts"]["inference_plan"] = str(self.plan_path)
+            if forecast_payload:
+                result["artifacts"]["forecast_json"] = forecast_payload.get("forecast_json")
+                result["artifacts"]["forecast_csv"] = forecast_payload.get("forecast_csv")
+            result["status"] = "partial" if any(
+                stage.get("status") == "partial" for stage in result["stages"].values()
+            ) else "success"
+            self._write_result(result)
+            print(f"Inference pipeline completed. Plan written to {self.plan_path}")
+            return plan
+        except PipelineExecutionError as exc:
+            result["status"] = "failed"
+            result["errors"].append(exc.to_dict())
+            self._write_result(result)
+            raise
+        except Exception as exc:
+            result["status"] = "failed"
+            code = "VALIDATION_ERROR" if isinstance(exc, (ValueError, TypeError)) else "UNEXPECTED_PIPELINE_ERROR"
+            if code == "VALIDATION_ERROR" and "validation" not in result["stages"]:
+                result["stages"]["validation"] = {"status": "failed"}
+            result["errors"].append(
+                {"code": code, "message": str(exc), "details": {"type": type(exc).__name__}}
+            )
+            self._write_result(result)
+            raise
+
+    def _base_result(self) -> dict[str, Any]:
+        return {
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
             "aoi_bbox": list(self.config.aoi_bbox),
             "target_date": self.config.target_date,
-            "run_dir": str(self.run_dir),
-            "tiles_geojson": str(self.tiles_geojson_path),
-            "water_manifest": str(self.water_manifest_path),
-            "tile_count": len(tiles),
-            "selected_water_tile_count": len(selected_records),
-            "selected_tiles": [record["name"] for record in selected_records],
-            "selected_tile_records": selected_records,
-            "history_interval": {
-                "start_date": history_start,
-                "end_date": history_end,
-                "cadence_days": self.config.model_profile.cadence_days,
-                "time_steps": self.config.model_profile.time_steps,
+            "run_name": self.run_dir.name,
+            "stages": {},
+            "tiles": {},
+            "warnings": [],
+            "errors": [],
+            "artifacts": {
+                "river_tiles": str(self.tiles_geojson_path),
+                "water_manifest": str(self.water_manifest_path),
+                "pipeline_result": str(self.result_path),
             },
-            "water_check_interval": {
-                "start_date": water_start,
-                "end_date": water_end,
-                "threshold": self.config.water_threshold,
-            },
-            "target_date_images": {
-                "enabled": self.config.download_images,
-                "date": self.config.target_date,
-                "keys": list(self.config.image_keys),
-                "downloads": image_downloads,
-            },
-            "inference": {
-                "enabled": self.config.run_inference,
-                "model_root": str(self.config.model_root),
-                "feature_csvs": feature_csvs,
-                "forecast_json": forecast_payload.get("forecast_json") if forecast_payload else None,
-                "forecast_csv": forecast_payload.get("forecast_csv") if forecast_payload else None,
-                "plot_dir": forecast_payload.get("plot_dir") if forecast_payload else None,
-            },
-            "model_profile": asdict(self.config.model_profile),
         }
-        self.plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
-        print(f"Inference pipeline completed. Plan written to {self.plan_path}")
-        return plan
+
+    def _write_result(self, result: dict[str, Any]) -> None:
+        result["completed_at"] = datetime.now(timezone.utc).isoformat()
+        self.result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _unavailable_images(downloads: dict[str, dict[str, dict[str, Any]]]) -> list[dict[str, str]]:
+        unavailable = []
+        for scope, products in downloads.items():
+            for key, record in products.items():
+                if record.get("status") != "available":
+                    unavailable.append({"scope": scope, "key": key, "message": str(record.get("message") or "")})
+        return unavailable
 
     def required_history_interval(self) -> tuple[str, str]:
         profile = self.config.model_profile
@@ -393,7 +549,7 @@ class AOIInferencePipeline:
         scalers_path = self._resolve_scalers_path(model_root, metadata)
         model_path = self._resolve_model_path(model_root, metadata)
         scalers = joblib.load(scalers_path)
-        model = self._load_model(model_path)
+        model = self._load_model(model_path, metadata)
 
         target_cols = list(scalers["target_cols"])
         time_steps = int(scalers.get("time_steps") or self.config.model_profile.time_steps)
@@ -629,7 +785,31 @@ class AOIInferencePipeline:
         return path
 
     @staticmethod
-    def _load_model(model_path: Path):
+    def _load_model(model_path: Path, metadata: dict[str, Any] | None = None):
+        metadata = metadata or {}
+        required_rebuild_keys = {
+            "feature_names",
+            "target_cols",
+            "target_indices",
+            "horizon",
+            "lstm_units",
+            "hidden",
+            "dropout",
+        }
+        if required_rebuild_keys.issubset(metadata):
+            model = build_model(
+                n_features=len(metadata["feature_names"]),
+                units1=int(metadata["lstm_units"]),
+                num_outputs=len(metadata["target_cols"]),
+                target_indices=tuple(metadata["target_indices"]),
+                horizon=int(metadata["horizon"]),
+                hidden=int(metadata["hidden"]),
+                dropout=float(metadata["dropout"]),
+                loss_name=str(metadata.get("loss_mode") or "mse"),
+            )
+            model.load_weights(model_path)
+            return model
+
         import builtins
         builtins.K = K
         builtins.tf = tf

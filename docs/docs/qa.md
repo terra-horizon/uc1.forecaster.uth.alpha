@@ -8,6 +8,37 @@ Run the repository test suite with:
 python3 -m pytest -q
 ```
 
+The default suite includes deterministic pipeline scenarios that control the
+external OSM and CDSE boundaries. Generated raw results are written under
+`tests/results/<scenario>/latest/` and are ignored by Git.
+
+## Live Pipeline Smoke Test
+
+Run the credentialed Sperchios happy-path integration test explicitly:
+
+```bash
+RUN_LIVE_PIPELINE_TESTS=1 python3 -m pytest -m live -q
+```
+
+The live test uses real OSM and CDSE services, so its duration and target-date
+image availability depend on external systems.
+
+## Scenario Report
+
+Regenerate the sanitized committed scenario report after executing the tests:
+
+```bash
+python3 scripts/generate-scenario-report.py
+```
+
+The [Pipeline Test Scenarios](pipeline-test-scenarios.md) page documents each
+scenario's expected result and latest verified execution. Validate the complete
+documentation site before publication:
+
+```bash
+mkdocs build --strict --config-file docs/mkdocs.yml
+```
+
 ## Docker Checks
 
 Build the image:
