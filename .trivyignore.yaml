@@ -1,0 +1,8 @@
+# vulnerabilities:
+#   - id: CVE-2026-8376
+#     expired_at: 2026-09-02
+#     statement: >-
+#       The published UC1 forecaster image is built for linux/amd64, while this
+#       Perl regex compiler overflow is reachable only on 32-bit Perl builds.
+#       Debian trixie currently has no fixed perl-base package; remove this
+#       exception once a fixed Debian/Python base image is available.
