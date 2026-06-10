@@ -12,6 +12,11 @@ The default suite includes deterministic pipeline scenarios that control the
 external OSM and CDSE boundaries. Generated raw results are written under
 `tests/results/<scenario>/latest/` and are ignored by Git.
 
+Several scenarios deliberately produce a `failed` pipeline status to verify
+that invalid or unavailable inputs are handled safely and recorded with the
+expected structured error code. When those expected outcomes are observed, the
+automated scenario test passes.
+
 ## Live Pipeline Smoke Test
 
 Run the credentialed Sperchios happy-path integration test explicitly:

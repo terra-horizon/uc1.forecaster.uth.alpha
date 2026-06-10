@@ -1,6 +1,16 @@
 # Architecture
 
-The UC1 Forecaster is organized as a batch inference pipeline around `forecast.py`.
+The Alpha 1 deployment of TERRA Product Chain 1 is organized as a batch
+inference pipeline around `forecast.py`.
+
+## Component Boundaries
+
+| Component | Alpha 1 implementation |
+| --- | --- |
+| Data Fusion and Preprocessing | River tile extraction, water selection, Sentinel-2 and Sentinel-3 collection, gap interpolation, temporal encoding, and scaling. |
+| ML Model Inference | Bundled global multi-feature BiLSTM inference and forecast generation. |
+| Hydrological and Water-Quality Digital Twin | Geospatial and forecasting foundations only; the complete Digital Twin is not implemented. |
+| Pipeline Orchestration and Result Delivery | Stage coordination, status recording, and artifact export through `forecast.py`. |
 
 ## Pipeline
 
@@ -12,6 +22,11 @@ The UC1 Forecaster is organized as a batch inference pipeline around `forecast.p
 6. The global preprocessor applies feature scaling and prepares model tensors.
 7. The bundled TensorFlow/Keras model generates the forecast horizon.
 8. The pipeline writes an inference plan, forecast outputs, and optional plots.
+
+The river tile extractor provides an initial hydrological geospatial context,
+but Alpha 1 does not run hydrological or hydraulic simulation models. Sentinel
+observations and ML forecasts will become inputs to the future complete
+Digital Twin.
 
 ## Model Artifacts
 

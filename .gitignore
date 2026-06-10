@@ -12,6 +12,7 @@ inference_results/
 data/inference_runs/
 tests/results/
 local_scans/
+docs/site/
 
 # Model evaluation plots are not required for alpha inference runtime.
 forecaster/models/default_model/evaluations/

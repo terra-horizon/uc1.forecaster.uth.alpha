@@ -1,8 +1,24 @@
-# TERRA Horizon Project - Use Case 1 Forecaster
+# TERRA Horizon Project - Product Chain 1
 
 **Version**: Alpha 1
 
-This is the Alpha 1 Version of the forecaster for **Use Case 1** of the **TERRA Horizon Project**: *Assessment of water contamination in coastal areas and in the water cycle.*
+This is the Alpha 1 deployment of **Product Chain 1** for **Use Case 1** of the
+**TERRA Horizon Project**: *Assessment of water contamination in coastal areas
+and in the water cycle.*
+
+Product Chain 1 currently implements:
+
+- **Data Fusion and Preprocessing for Water Contamination**
+- **ML Model Inference for Water Contamination Forecasting**
+- **Pipeline Orchestration and Result Delivery**
+
+It also provides initial geospatial and forecasting foundations for a future
+**Hydrological and Water-Quality Digital Twin**. The complete Digital Twin,
+including hydrological models, integrated observations and predictions, data
+assimilation, and scenario simulation, is not yet implemented.
+
+See the [Product Chain 1 component documentation](docs/docs/product-chain.md)
+for the scope and status of each component.
 
 > **Note:** This version does **not** contain meteorological data (e.g., OpenMeteo). Meteorological integration will be added in future versions.
 
@@ -10,7 +26,8 @@ This is the Alpha 1 Version of the forecaster for **Use Case 1** of the **TERRA 
 
 ## High-Level Architecture & Features
 
-This pipeline operates purely as an inference engine to forecast water quality indicators.
+This alpha pipeline operates as a data-preparation and inference chain for
+forecasting water-quality indicators.
 
 ### Features
 We focus on key water quality indicators extracted primarily from satellite imagery (Sentinel-2 and Sentinel-3):
