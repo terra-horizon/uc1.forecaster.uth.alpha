@@ -1,4 +1,4 @@
-# TERRA Horizon Project - Product Chain 1
+# TERRA UC1 - Water Contamination Assessment and Forecasting
 
 **Version**: Alpha 1
 

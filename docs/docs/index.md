@@ -1,4 +1,4 @@
-# TERRA Product Chain 1
+# TERRA UC1 - Water Contamination Assessment and Forecasting
 
 This deployment is **Alpha 1 of TERRA Product Chain 1** for Use Case 1:
 assessment of water contamination in coastal areas and in the water cycle.

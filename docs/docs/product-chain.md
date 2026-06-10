@@ -1,10 +1,10 @@
-# Product Chain 1
+# TERRA UC1 - Water Contamination Assessment and Forecasting
 
 ## Product Summary
 
 | Field | Description |
 | --- | --- |
-| **Name** | TERRA Product Chain 1 - Water Contamination Assessment and Forecasting |
+| **Name** | TERRA UC1 - Water Contamination Assessment and Forecasting |
 | **Release** | Alpha 1 |
 | **Description** | An alpha deployment that transforms satellite observations for an area of interest into prepared water-quality time series and short-term water-contamination forecasts. It also provides the first geospatial and forecasting foundations for a future Hydrological and Water-Quality Digital Twin. |
 | **Components** | Data Fusion and Preprocessing; ML Model Inference; Hydrological and Water-Quality Digital Twin foundations; Pipeline Orchestration and Result Delivery. |
