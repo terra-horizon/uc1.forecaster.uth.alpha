@@ -8,6 +8,8 @@ nav:
   - Product Chain 1: product-chain.md
   - System:
     - Architecture: architecture.md
+    # - Partner Data Flow: demonstrator-data-flow-partners.md
+    # - Demonstrator Data Schemas: collector-data-schemas.md
   - Setup & Monitoring:
     - Deployment: deployment.md
     - Configuration: configuration.md

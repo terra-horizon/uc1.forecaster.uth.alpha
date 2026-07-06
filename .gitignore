@@ -13,6 +13,12 @@ data/inference_runs/
 tests/results/
 local_scans/
 docs/site/
+outputs/
+tmp/
+
+# Internal data schemas
+docs/docs/alpha-uc1-data-schema-high-lvl.md
+docs/docs/alpha-uc1-data-schemas.md
 
 # Model evaluation plots are not required for alpha inference runtime.
 forecaster/models/default_model/evaluations/
