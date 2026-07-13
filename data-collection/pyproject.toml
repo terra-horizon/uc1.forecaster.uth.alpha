@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terra-data-collection"
+version = "0.1.0"
+description = "Standalone incremental Sentinel-2 data collection for TERRA UC1"
+requires-python = ">=3.10"
+dependencies = [
+  "geopandas==1.1.2",
+  "numpy==2.2.3",
+  "osmnx==2.0.7",
+  "pandas==2.2.3",
+  "Pillow==12.2.0",
+  "python-dotenv==1.0.1",
+  "requests==2.32.3",
+  "shapely==2.0.7",
+]
+
+[project.optional-dependencies]
+test = ["jsonschema>=4.23", "pytest==8.3.4"]
+
+[project.scripts]
+terra-collect = "data_collection.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["data_collection*"]
+
+[tool.setuptools.package-data]
+data_collection = ["schemas/*.json"]

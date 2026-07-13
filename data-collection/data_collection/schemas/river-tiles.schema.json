@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/river-tiles.schema.json",
+  "type": "object",
+  "required": ["type", "aoi_bbox", "tile_count", "features"],
+  "properties": {
+    "type": {"const": "FeatureCollection"},
+    "aoi_bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+    "tile_count": {"type": "integer", "minimum": 0},
+    "features": {"type": "array", "items": {"type": "object", "required": ["type", "geometry", "properties"]}}
+  },
+  "additionalProperties": true
+}

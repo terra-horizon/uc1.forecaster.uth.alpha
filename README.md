@@ -75,6 +75,8 @@ The entire inference process is orchestrated via the central `forecast.py` scrip
 6. **Inference**: The pre-processed 5-day time series is passed to the Global BiLSTM model to forecast the future state of the water quality indicators.
 7. **Export**: Predictions are saved as `.json` and `.csv` files, alongside visual plots showing history vs. forecast.
 
+The scheduled pipeline uses the tracked [standalone data-collection module](data-collection/README.md) through a local provider contract. Collection state and history are independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later.
+
 ### Example Inference Run
 
 ```bash

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/collection-request.schema.json",
+  "type": "object",
+  "required": ["aoi_bbox", "run_name", "history_start", "mode"],
+  "properties": {
+    "aoi_bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+    "run_name": {"type": "string", "minLength": 1},
+    "history_start": {"type": "string", "format": "date"},
+    "target_date": {"type": ["string", "null"], "format": "date"},
+    "mode": {"enum": ["auto", "backfill", "incremental"]},
+    "dry_run": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

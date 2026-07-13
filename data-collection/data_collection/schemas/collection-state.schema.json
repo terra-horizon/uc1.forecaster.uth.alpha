@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/collection-state.schema.json",
+  "type": "object",
+  "required": ["schema_version", "known_stac_dates", "completed_dates", "expected_tile_ids", "failed_units", "backfill_complete"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "known_stac_dates": {"type": "array", "items": {"type": "string", "format": "date"}, "uniqueItems": true},
+    "completed_dates": {"type": "array", "items": {"type": "string", "format": "date"}, "uniqueItems": true},
+    "expected_tile_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "failed_units": {"type": "array", "items": {"type": "object"}},
+    "backfill_complete": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

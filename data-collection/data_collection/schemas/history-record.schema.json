@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/history-record.schema.json",
+  "title": "TERRA UC1 collection history record",
+  "type": "object",
+  "required": [
+    "schema_version", "tile_id", "observation_date", "bbox", "collection_status",
+    "water_status", "water_pct", "cloud_pct", "valid_pixels", "source_scene_count",
+    "stac_item_ids", "asset_paths", "quality_flags", "attempt_count", "created_at",
+    "updated_at", "CDOM", "Chl_a", "Color", "Cya", "DOC", "Turb", "WQI"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "tile_id": {"type": "string", "minLength": 1},
+    "observation_date": {"type": "string", "format": "date"},
+    "bbox": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number"}, {"type": "number"}], "minItems": 4, "maxItems": 4},
+    "collection_status": {"enum": ["collected", "unavailable"]},
+    "water_status": {"enum": ["water", "no_water", "unknown"]},
+    "water_pct": {"type": ["number", "null"]},
+    "cloud_pct": {"type": ["number", "null"]},
+    "valid_pixels": {"type": "integer", "minimum": 0},
+    "source_scene_count": {"type": "integer", "minimum": 0},
+    "stac_item_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "asset_paths": {"type": "object"},
+    "quality_flags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "attempt_count": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "CDOM": {"type": ["number", "null"]},
+    "Chl_a": {"type": ["number", "null"]},
+    "Color": {"type": ["number", "null"]},
+    "Cya": {"type": ["number", "null"]},
+    "DOC": {"type": ["number", "null"]},
+    "Turb": {"type": ["number", "null"]},
+    "WQI": {"type": ["number", "null"]}
+  },
+  "additionalProperties": true
+}

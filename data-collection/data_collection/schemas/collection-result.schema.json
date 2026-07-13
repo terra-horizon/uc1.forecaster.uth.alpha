@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/collection-result.schema.json",
+  "type": "object",
+  "required": ["status", "run_dir", "run_summary", "mode", "available_dates", "missing_dates", "collected_dates", "new_record_count", "failed_units", "warnings"],
+  "properties": {
+    "status": {"enum": ["success", "partial", "dry_run"]},
+    "run_dir": {"type": "string"},
+    "run_summary": {"type": "string"},
+    "mode": {"enum": ["auto", "backfill", "incremental"]},
+    "available_dates": {"type": "array", "items": {"type": "string", "format": "date"}},
+    "missing_dates": {"type": "array", "items": {"type": "string", "format": "date"}},
+    "collected_dates": {"type": "array", "items": {"type": "string", "format": "date"}},
+    "new_record_count": {"type": "integer", "minimum": 0},
+    "failed_units": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

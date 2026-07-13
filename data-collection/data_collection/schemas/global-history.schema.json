@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terra-project.eu/schemas/uc1/global-history.schema.json",
+  "title": "TERRA UC1 global collection history",
+  "type": "array",
+  "items": {"$ref": "history-record.schema.json"}
+}

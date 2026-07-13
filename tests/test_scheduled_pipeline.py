@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import CDSE_Credentials
+from forecaster.collection_provider import CollectionResult
 from forecaster.scheduled_pipeline import (
     ScheduledIncrementalPipeline,
     ScheduledPipelineConfig,
@@ -26,6 +27,71 @@ class FakeDiscovery:
         self.calls.append((start_date, end_date))
         dates = [date for date in self.dates if start_date <= date <= end_date]
         return dates, {date: [f"S2_{date}"] for date in dates}, []
+
+
+class FakeCollectionProvider:
+    def __init__(self, dates: list[str]):
+        self.dates = dates
+        self.requests = []
+
+    def collect(self, request):
+        self.requests.append(request)
+        run_dir = Path(request.output_root) / request.run_name
+        if request.dry_run:
+            return CollectionResult(
+                status="dry_run",
+                run_dir=str(run_dir),
+                run_summary=f"Dry run found {len(self.dates)} date(s) that require collection; no files were written.",
+                mode=request.mode,
+                available_dates=self.dates,
+                missing_dates=self.dates,
+                discovery_windows=[{"start_date": request.history_start, "end_date": request.target_date}],
+            )
+
+        history = [
+            build_history_record(
+                tile_id="tile_0",
+                observed_date=observed,
+                bbox=[22.0, 38.0, 22.01, 38.01],
+                metrics=metric_values(),
+                water_scene=water_manifest(self.dates)["tiles"][0]["scenes"][index],
+                stac_item_ids=[f"S2_{observed}"],
+            )
+            for index, observed in enumerate(self.dates)
+        ]
+        history_path = run_dir / "history" / "global_history.json"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(history), encoding="utf-8")
+        pd.DataFrame(history).to_csv(run_dir / "history" / "global_history.csv", index=False)
+        records_path = run_dir / "tiles" / "tile_records.json"
+        records_path.parent.mkdir(parents=True, exist_ok=True)
+        records_path.write_text(json.dumps(tile_records()), encoding="utf-8")
+        water_path = run_dir / "water" / f"water_selection_{self.dates[0]}_{self.dates[-1]}.json"
+        water_path.parent.mkdir(parents=True, exist_ok=True)
+        water_path.write_text(json.dumps(water_manifest(self.dates)), encoding="utf-8")
+        collection_state = run_dir / "collection" / "state.json"
+        collection_state.parent.mkdir(parents=True, exist_ok=True)
+        collection_state.write_text(json.dumps({
+            "known_stac_dates": self.dates,
+            "completed_dates": self.dates,
+            "last_collected_date": self.dates[-1],
+        }), encoding="utf-8")
+        return CollectionResult(
+            status="success",
+            run_dir=str(run_dir),
+            run_summary=f"Collected {len(history)} tile-date record(s).",
+            mode=request.mode,
+            available_dates=self.dates,
+            missing_dates=self.dates,
+            collected_dates=self.dates,
+            new_record_count=len(history),
+            latest_usable_observation=self.dates[-1],
+            history_json_path=str(history_path),
+            history_csv_path=str(run_dir / "history" / "global_history.csv"),
+            tile_records_path=str(records_path),
+            water_manifest_path=str(water_path),
+            state_path=str(collection_state),
+        )
 
 
 def tile_records():
@@ -120,8 +186,9 @@ def test_build_run_summary_explains_noop_forecast():
     assert "already forecasted" in summary
 
 
-def test_scheduled_first_run_updates_history_state_and_stac_collection(tmp_path, monkeypatch):
+def test_scheduled_first_run_uses_collection_provider_and_exports_stac(tmp_path):
     dates = ["2026-01-01", "2026-01-06"]
+    provider = FakeCollectionProvider(dates)
     pipeline = ScheduledIncrementalPipeline(
         ScheduledPipelineConfig(
             aoi_bbox=[22.0, 38.0, 22.01, 38.01],
@@ -131,25 +198,7 @@ def test_scheduled_first_run_updates_history_state_and_stac_collection(tmp_path,
             target_date="2026-01-06",
             run_inference=False,
         ),
-        discovery=FakeDiscovery(dates),
-    )
-
-    monkeypatch.setattr(pipeline, "_extract_tiles", lambda: (tile_records(), tmp_path / "river_tiles.geojson"))
-    monkeypatch.setattr(pipeline, "_build_water_manifest", lambda _path, requested_dates: water_manifest(requested_dates))
-    monkeypatch.setattr(
-        pipeline,
-        "_collect_history_records",
-        lambda tile_records, dates, water_manifest, stac_item_ids: [
-            build_history_record(
-                tile_id="tile_0",
-                observed_date=observed,
-                bbox=[22.0, 38.0, 22.01, 38.01],
-                metrics=metric_values(),
-                water_scene=water_manifest["tiles"][0]["scenes"][index],
-                stac_item_ids=stac_item_ids[observed],
-            )
-            for index, observed in enumerate(dates)
-        ],
+        collection_provider=provider,
     )
 
     result = pipeline.execute()
@@ -161,17 +210,16 @@ def test_scheduled_first_run_updates_history_state_and_stac_collection(tmp_path,
     history = json.loads((tmp_path / "test_run" / "history" / "global_history.json").read_text())
     assert len(history) == 2
     assert pd.read_csv(tmp_path / "test_run" / "history" / "global_history.csv").shape[0] == 2
-    state = json.loads((tmp_path / "test_run" / "state.json").read_text())
+    state = json.loads((tmp_path / "test_run" / "collection" / "state.json").read_text())
     assert state["known_stac_dates"] == dates
     assert state["last_collected_date"] == "2026-01-06"
-    assert state["backfill_cursor"] == "2026-01-07"
+    assert provider.requests[0].mode == "auto"
     collection = json.loads((tmp_path / "test_run" / "stac_catalog" / "collection.json").read_text())
     assert set(collection["item_assets"]) == {"overview", "tile_0"}
 
 
-def test_scheduled_run_reuses_cached_stac_discovery(tmp_path, monkeypatch):
-    dates = ["2026-01-01"]
-    discovery = FakeDiscovery(dates)
+def test_scheduled_maps_backfill_flag_to_collection_provider(tmp_path):
+    provider = FakeCollectionProvider(["2026-01-01"])
     pipeline = ScheduledIncrementalPipeline(
         ScheduledPipelineConfig(
             aoi_bbox=[22.0, 38.0, 22.01, 38.01],
@@ -180,50 +228,15 @@ def test_scheduled_run_reuses_cached_stac_discovery(tmp_path, monkeypatch):
             history_start="2026-01-01",
             target_date="2026-01-01",
             run_inference=False,
+            backfill_all=True,
         ),
-        discovery=discovery,
+        collection_provider=provider,
     )
-    monkeypatch.setattr(pipeline, "_extract_tiles", lambda: (tile_records(), tmp_path / "river_tiles.geojson"))
-    monkeypatch.setattr(pipeline, "_build_water_manifest", lambda _path, requested_dates: water_manifest(requested_dates))
-    monkeypatch.setattr(
-        pipeline,
-        "_collect_history_records",
-        lambda tile_records, dates, water_manifest, stac_item_ids: [
-            build_history_record(
-                tile_id="tile_0",
-                observed_date="2026-01-01",
-                bbox=[22.0, 38.0, 22.01, 38.01],
-                metrics=metric_values(),
-                water_scene=water_manifest["tiles"][0]["scenes"][0],
-                stac_item_ids=stac_item_ids["2026-01-01"],
-            )
-        ],
-    )
-
     pipeline.execute()
-    cache_path = tmp_path / "cached" / "stac_cache" / "2026-01-01_2026-01-01.json"
-    assert cache_path.exists()
-
-    second_discovery = FakeDiscovery(["2026-01-02"])
-    second_pipeline = ScheduledIncrementalPipeline(
-        ScheduledPipelineConfig(
-            aoi_bbox=[22.0, 38.0, 22.01, 38.01],
-            run_name="cached",
-            output_root=tmp_path,
-            history_start="2026-01-01",
-            target_date="2026-01-01",
-            dry_run=True,
-            run_inference=False,
-        ),
-        discovery=second_discovery,
-    )
-    second_result = second_pipeline.execute()
-
-    assert second_result.available_dates == []
-    assert second_discovery.calls == []
+    assert provider.requests[0].mode == "backfill"
 
 
-def test_scheduled_dry_run_does_not_write_history_or_state(tmp_path, monkeypatch):
+def test_scheduled_dry_run_does_not_write_history_or_state(tmp_path):
     pipeline = ScheduledIncrementalPipeline(
         ScheduledPipelineConfig(
             aoi_bbox=[22.0, 38.0, 22.01, 38.01],
@@ -234,22 +247,17 @@ def test_scheduled_dry_run_does_not_write_history_or_state(tmp_path, monkeypatch
             dry_run=True,
             run_inference=False,
         ),
-        discovery=FakeDiscovery(["2026-01-01"]),
-    )
-    monkeypatch.setattr(
-        pipeline,
-        "_extract_tiles",
-        lambda: (_ for _ in ()).throw(AssertionError("dry run should not extract tiles")),
+        collection_provider=FakeCollectionProvider(["2026-01-01"]),
     )
 
     result = pipeline.execute()
 
     assert result.status == "dry_run"
-    assert result.run_summary == "Dry run found new satellite dates that would be collected."
+    assert "Dry run found 1 date" in result.run_summary
     assert result.new_data_available is True
     assert result.forecast_status == "dry_run"
     assert result.missing_dates == ["2026-01-01"]
-    assert not (tmp_path / "dry" / "state.json").exists()
+    assert not (tmp_path / "dry" / "collection" / "state.json").exists()
     assert not (tmp_path / "dry" / "history" / "global_history.json").exists()
 
 
