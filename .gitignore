@@ -14,11 +14,17 @@ tests/results/
 local_scans/
 docs/site/
 outputs/
+output/
 tmp/
 
 # Internal data schemas
 docs/docs/alpha-uc1-data-schema-high-lvl.md
 docs/docs/alpha-uc1-data-schemas.md
 
+# STAC Catalog schemas
+/stac-water-pollution-md/
+
 # Model evaluation plots are not required for alpha inference runtime.
 forecaster/models/default_model/evaluations/
+
+
