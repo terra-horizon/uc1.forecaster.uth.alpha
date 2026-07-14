@@ -120,7 +120,27 @@ def test_first_run_writes_incremental_contract_and_validates(tmp_path):
     assert all(row["water_check_status"] == "not_performed" for row in history)
     assert all(row["water_status"] == "unknown" for row in history)
     assert pd.read_csv(result.history_csv_path).shape[0] == len(history)
+    assert (Path(result.run_dir) / "cdse_stac_cache" / "2026-01-01_2026-01-06.json").exists()
+    assert not (Path(result.run_dir) / "stac_cache").exists()
     assert validate_run(Path(result.run_dir))["valid"] is True
+
+
+def test_legacy_stac_cache_is_reused_and_promoted(tmp_path):
+    run_dir = tmp_path / "test"
+    legacy_cache = run_dir / "stac_cache" / "2026-01-01_2026-01-06.json"
+    legacy_cache.parent.mkdir(parents=True)
+    legacy_cache.write_text(json.dumps({
+        "available_dates": DATES,
+        "stac_item_ids": {value: [f"S2_{value}"] for value in DATES},
+        "warnings": [],
+    }), encoding="utf-8")
+    discovery = FakeDiscovery([])
+
+    result = service(discovery).collect(request(tmp_path))
+
+    assert result.status == "success"
+    assert discovery.calls == []
+    assert (run_dir / "cdse_stac_cache" / "2026-01-01_2026-01-06.json").exists()
 
 
 def test_incremental_rerun_is_noop_and_does_not_duplicate(tmp_path):

@@ -239,10 +239,17 @@ class CollectionService:
         write_json(self.run_dir / "collection" / "state.json", state)
 
     def _discover_window(self, discovery: Any, start_date: str, end_date: str):
-        cache = self.run_dir / "stac_cache" / f"{start_date}_{end_date}.json"
+        cache = self.run_dir / "cdse_stac_cache" / f"{start_date}_{end_date}.json"
+        legacy_cache = self.run_dir / "stac_cache" / f"{start_date}_{end_date}.json"
         if cache.exists():
             value = read_json(cache, {})
-            self._log(f"Using cached STAC discovery window: {cache}")
+            self._log(f"Using cached CDSE STAC discovery window: {cache}")
+            return value.get("available_dates", []), value.get("stac_item_ids", {}), value.get("warnings", [])
+        if legacy_cache.exists():
+            value = read_json(legacy_cache, {})
+            self._log(f"Using legacy cached CDSE STAC discovery window: {legacy_cache}")
+            if not self.request.dry_run:
+                write_json(cache, value)
             return value.get("available_dates", []), value.get("stac_item_ids", {}), value.get("warnings", [])
         dates, item_ids, warnings = discovery.discover_dates(list(self.request.aoi_bbox), start_date, end_date)
         if not self.request.dry_run:
