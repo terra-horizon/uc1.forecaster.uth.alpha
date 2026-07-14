@@ -9,7 +9,6 @@ description = "Standalone incremental Sentinel-2 data collection for TERRA UC1"
 requires-python = ">=3.10"
 dependencies = [
   "geopandas==1.1.2",
-  "numpy==2.2.3",
   "osmnx==2.0.7",
   "pandas==2.2.3",
   "Pillow==12.2.0",

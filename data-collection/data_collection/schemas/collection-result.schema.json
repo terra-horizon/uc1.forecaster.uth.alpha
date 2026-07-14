@@ -12,6 +12,7 @@
     "missing_dates": {"type": "array", "items": {"type": "string", "format": "date"}},
     "collected_dates": {"type": "array", "items": {"type": "string", "format": "date"}},
     "new_record_count": {"type": "integer", "minimum": 0},
+    "latest_available_observation": {"type": ["string", "null"], "format": "date"},
     "failed_units": {"type": "array", "items": {"type": "object"}},
     "warnings": {"type": "array", "items": {"type": "object"}}
   },

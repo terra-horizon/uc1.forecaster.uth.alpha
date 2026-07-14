@@ -10,6 +10,7 @@ from forecaster.collection_provider import CollectionResult
 from forecaster.scheduled_pipeline import (
     ScheduledIncrementalPipeline,
     ScheduledPipelineConfig,
+    apply_water_manifest,
     build_history_record,
     build_run_summary,
     compute_discovery_windows,
@@ -54,7 +55,6 @@ class FakeCollectionProvider:
                 observed_date=observed,
                 bbox=[22.0, 38.0, 22.01, 38.01],
                 metrics=metric_values(),
-                water_scene=water_manifest(self.dates)["tiles"][0]["scenes"][index],
                 stac_item_ids=[f"S2_{observed}"],
             )
             for index, observed in enumerate(self.dates)
@@ -66,6 +66,16 @@ class FakeCollectionProvider:
         records_path = run_dir / "tiles" / "tile_records.json"
         records_path.parent.mkdir(parents=True, exist_ok=True)
         records_path.write_text(json.dumps(tile_records()), encoding="utf-8")
+        geojson_path = run_dir / "tiles" / "river_tiles.geojson"
+        geojson_path.write_text(json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "id": "tile_0",
+                "geometry": {"type": "Polygon", "coordinates": [[[22.0, 38.0], [22.01, 38.0], [22.01, 38.01], [22.0, 38.01], [22.0, 38.0]]]},
+                "properties": {"name": "tile_0"},
+            }],
+        }), encoding="utf-8")
         water_path = run_dir / "water" / f"water_selection_{self.dates[0]}_{self.dates[-1]}.json"
         water_path.parent.mkdir(parents=True, exist_ok=True)
         water_path.write_text(json.dumps(water_manifest(self.dates)), encoding="utf-8")
@@ -85,11 +95,11 @@ class FakeCollectionProvider:
             missing_dates=self.dates,
             collected_dates=self.dates,
             new_record_count=len(history),
-            latest_usable_observation=self.dates[-1],
+            latest_available_observation=self.dates[-1],
             history_json_path=str(history_path),
             history_csv_path=str(run_dir / "history" / "global_history.csv"),
             tile_records_path=str(records_path),
-            water_manifest_path=str(water_path),
+            tiles_geojson_path=str(geojson_path),
             state_path=str(collection_state),
         )
 
@@ -313,3 +323,67 @@ def test_cdse_credentials_discovers_backup_sets(monkeypatch):
     credentials = CDSE_Credentials.get_credential_sets()
 
     assert [credential["label"] for credential in credentials] == ["primary", "backup", "backup_2"]
+
+
+def test_forecaster_enriches_history_with_water_without_mutating_collector_record():
+    source = build_history_record(
+        tile_id="tile_0",
+        observed_date="2026-01-01",
+        bbox=[22.0, 38.0, 22.01, 38.01],
+        metrics=metric_values(),
+        stac_item_ids=["S2_A"],
+    )
+    manifest = water_manifest(["2026-01-01"])
+    manifest["evaluated_dates"] = ["2026-01-01"]
+
+    evaluated = apply_water_manifest([source], manifest)
+
+    assert source["water_check_status"] == "not_performed"
+    assert source["water_status"] == "unknown"
+    assert evaluated[0]["water_check_status"] == "evaluated"
+    assert evaluated[0]["water_status"] == "water"
+
+
+def test_forecaster_water_history_queries_only_unchecked_dates(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeSelector:
+        def __init__(self, **kwargs):
+            self.interval = kwargs["water_check_interval"]
+
+        def select_tiles(self):
+            calls.append(self.interval)
+            return water_manifest(list(self.interval))
+
+        def build_manifest_from_tiles(self, records):
+            payload = water_manifest([])
+            payload["tiles"] = records
+            payload["selected_tiles"] = ["tile_0"]
+            return payload
+
+    monkeypatch.setattr("forecaster.scheduled_pipeline.WaterTileSelector", FakeSelector)
+    pipeline = ScheduledIncrementalPipeline(ScheduledPipelineConfig(
+        aoi_bbox=[22.0, 38.0, 22.01, 38.01],
+        run_name="water_cache",
+        output_root=tmp_path,
+        run_inference=False,
+    ))
+    geojson = tmp_path / "tiles.geojson"
+    geojson.write_text(json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8")
+    history = [
+        build_history_record(
+            tile_id="tile_0",
+            observed_date=observed,
+            bbox=[22.0, 38.0, 22.01, 38.01],
+            metrics=metric_values(),
+            stac_item_ids=[f"S2_{observed}"],
+        )
+        for observed in ["2026-01-01", "2026-01-06"]
+    ]
+
+    first = pipeline._build_inference_water_manifest(str(geojson), history, "2026-01-06")
+    second = pipeline._build_inference_water_manifest(str(geojson), history, "2026-01-06")
+
+    assert calls == [("2026-01-01", "2026-01-06")]
+    assert first["evaluated_dates"] == ["2026-01-01", "2026-01-06"]
+    assert second["evaluated_dates"] == first["evaluated_dates"]

@@ -1,6 +1,6 @@
 # TERRA UC1 Data Collection
 
-This folder is the standalone data-collection module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, water and cloud screening, statistical metric collection, incremental history, validation, and collection state. It does not contain preprocessing, model inference, forecast persistence, or forecast STAC export.
+This folder is the standalone data-collection module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state. It does not decide whether a tile contains water; that check belongs to the forecasting pipeline.
 
 ## Install
 
@@ -70,7 +70,7 @@ Collection progress is tracked per `tile_id + observation_date`. A date is compl
 
 ## Outputs
 
-Each run writes collection state and result metadata, global and per-tile JSON/CSV history, river-tile GeoJSON, water-screening manifests, STAC discovery caches, and JSONL logs. See [DATA_CONTRACT.md](DATA_CONTRACT.md) and `data_collection/schemas/` for the exchange contract.
+Each run writes collection state and result metadata, global and per-tile JSON/CSV history, river-tile GeoJSON, STAC discovery caches, and JSONL logs. Collector records use `water_check_status: not_performed` and `water_status: unknown`; the forecaster enriches copies of those records before inference. See [DATA_CONTRACT.md](DATA_CONTRACT.md) and `data_collection/schemas/` for the exchange contract.
 
 The Python integration boundary is:
 

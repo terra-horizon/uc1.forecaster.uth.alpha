@@ -10,6 +10,28 @@ cya = Cya_Se2WaQ.se2waq
 wqi = WQI.wqi
 wqi2 = WQI2.wqi2
 
+sentinel2_statistics_all_pixels = """
+//VERSION=3
+function setup() {
+  return {
+    input: [{
+      bands: ["B01", "B02", "B03", "B04", "B08", "dataMask"]
+    }],
+    output: [
+      { id: "data", bands: 5 },
+      { id: "dataMask", bands: 1 }
+    ]
+  };
+}
+
+function evaluatePixel(samples) {
+  return {
+    data: [samples.B01, samples.B02, samples.B03, samples.B04, samples.B08],
+    dataMask: [samples.dataMask]
+  };
+}
+"""
+
 true_color_optimized = """
 //VERSION=3
 function setup() {

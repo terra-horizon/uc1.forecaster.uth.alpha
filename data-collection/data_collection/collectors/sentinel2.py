@@ -60,10 +60,9 @@ class StatisticalCollection:
         self.max_cloud_coverage = max_cloud_coverage
         self.failures = []
 
-        # Evalscript (water masking)
+        # Collect all valid pixels. Water eligibility is evaluated by the forecaster.
         self.evalscripts = {
-            "Se2WaQ": scripts.wqi,
-            "Se2WaQ2": scripts.wqi2,
+            "all_pixels": scripts.sentinel2_statistics_all_pixels,
         }
         self.chl_a_thresholds = [
             (0, 100), (5, 100), (10, 80), (20, 60), (40, 30), (1000, 0)
@@ -247,8 +246,7 @@ class StatisticalCollection:
 
         for slot in self.slots:
             image_count += 1
-            # response = self.get_request(self.evalscripts['Se2WaQ2'],slot,bbox)
-            response = self.get_request(self.evalscripts['Se2WaQ2'],slot, self.bbox)
+            response = self.get_request(self.evalscripts["all_pixels"], slot, self.bbox)
             if not response:
                 print("[Statistics] No response received; skipping this slot.")
                 self.failures.append({"interval": list(slot), "status_code": None, "reason": "no_response"})

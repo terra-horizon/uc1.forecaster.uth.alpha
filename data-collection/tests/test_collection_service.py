@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from data_collection.collectors.sentinel2 import StatisticalCollection
+from data_collection.evalscripts import sentinel2_statistics_all_pixels
 from data_collection.models import CollectionRequest
 from data_collection.service import CollectionService
 from data_collection.validation import validate_run
@@ -49,27 +50,22 @@ class FakeTileExtractor:
         return [], path
 
 
-class FakeWaterSelector:
-    def __init__(self, **kwargs):
-        self.path = Path(kwargs["cache_path"])
-        self.start, self.end = kwargs["water_check_interval"]
-
-    def select_tiles(self):
-        scenes = [
-            {"date": value, "water_pct": 20.0, "cloud_pct": 1.0, "valid_pixels": 100}
-            for value in DATES
-            if self.start <= value <= self.end
-        ]
-        payload = {
-            "created_at": "2026-01-07T00:00:00Z",
-            "threshold": {"mode": "distribution", "value_pct": 0.5},
-            "selected_tiles": ["tile_0"],
-            "rejected_tiles": [],
-            "tiles": [{"name": "tile_0", "selected": True, "scenes": scenes}],
-        }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(payload), encoding="utf-8")
-        return payload
+class MultiTileExtractor(FakeTileExtractor):
+    def extract_to_geojson(self, output_path):
+        features = []
+        for index in range(2):
+            offset = index * 0.02
+            features.append({
+                "type": "Feature",
+                "id": f"tile_{index}",
+                "geometry": {"type": "Polygon", "coordinates": [[[22.0 + offset, 38.0], [22.01 + offset, 38.0], [22.01 + offset, 38.01], [22.0 + offset, 38.01], [22.0 + offset, 38.0]]]},
+                "properties": {"name": f"tile_{index}"},
+            })
+        payload = {"type": "FeatureCollection", "aoi_bbox": self.config.aoi_bbox, "tile_count": 2, "features": features}
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return [], path
 
 
 class FakeStatistics:
@@ -96,7 +92,6 @@ def service(discovery):
     return CollectionService(
         discovery_factory=lambda _cloud: discovery,
         statistics_factory=FakeStatistics,
-        water_selector_factory=FakeWaterSelector,
         tile_extractor_factory=FakeTileExtractor,
     )
 
@@ -122,6 +117,8 @@ def test_first_run_writes_incremental_contract_and_validates(tmp_path):
     history = json.loads(Path(result.history_json_path).read_text())
     assert [(row["tile_id"], row["observation_date"]) for row in history] == [("tile_0", "2026-01-01"), ("tile_0", "2026-01-06")]
     assert all(row["collection_status"] == "collected" for row in history)
+    assert all(row["water_check_status"] == "not_performed" for row in history)
+    assert all(row["water_status"] == "unknown" for row in history)
     assert pd.read_csv(result.history_csv_path).shape[0] == len(history)
     assert validate_run(Path(result.run_dir))["valid"] is True
 
@@ -205,7 +202,6 @@ def test_retryable_failure_is_not_written_as_no_data_and_resumes(tmp_path):
     failing = CollectionService(
         discovery_factory=lambda _cloud: FakeDiscovery(DATES),
         statistics_factory=FailingStatistics,
-        water_selector_factory=FakeWaterSelector,
         tile_extractor_factory=FakeTileExtractor,
     )
     first = failing.collect(request(tmp_path))
@@ -223,7 +219,6 @@ def test_genuine_no_data_is_terminal_with_strict_nulls(tmp_path):
     collector = CollectionService(
         discovery_factory=lambda _cloud: FakeDiscovery(DATES),
         statistics_factory=EmptyStatistics,
-        water_selector_factory=FakeWaterSelector,
         tile_extractor_factory=FakeTileExtractor,
     )
     result = collector.collect(request(tmp_path))
@@ -233,3 +228,23 @@ def test_genuine_no_data_is_terminal_with_strict_nulls(tmp_path):
     assert all(record["collection_status"] == "unavailable" for record in history)
     assert all(record["CDOM"] is None for record in history)
     assert "NaN" not in raw
+
+
+def test_collector_collects_every_tile_without_water_screening(tmp_path):
+    collector = CollectionService(
+        discovery_factory=lambda _cloud: FakeDiscovery(DATES),
+        statistics_factory=FakeStatistics,
+        tile_extractor_factory=MultiTileExtractor,
+    )
+    result = collector.collect(request(tmp_path))
+    history = json.loads(Path(result.history_json_path).read_text())
+
+    assert {(record["tile_id"], record["observation_date"]) for record in history} == {
+        ("tile_0", "2026-01-01"),
+        ("tile_0", "2026-01-06"),
+        ("tile_1", "2026-01-01"),
+        ("tile_1", "2026-01-06"),
+    }
+    assert all(record["water_check_status"] == "not_performed" for record in history)
+    assert not (Path(result.run_dir) / "water").exists()
+    assert "waterMask" not in sentinel2_statistics_all_pixels

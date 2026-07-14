@@ -24,10 +24,7 @@ class CollectionRequest:
     box_size_m: int = 400
     min_river_length_m: float = 10_000.0
     projected_crs: str = "EPSG:32634"
-    water_threshold: str | float = "distribution"
-    water_min_auto_threshold_pct: float = 0.5
     max_cloud_coverage: int = 30
-    refresh_water: bool = False
 
     def __post_init__(self) -> None:
         if len(self.aoi_bbox) != 4:
@@ -62,12 +59,11 @@ class CollectionResult:
     collected_dates: list[str] = field(default_factory=list)
     new_record_count: int = 0
     failed_units: list[dict[str, Any]] = field(default_factory=list)
-    latest_usable_observation: str | None = None
+    latest_available_observation: str | None = None
     history_json_path: str | None = None
     history_csv_path: str | None = None
     tile_records_path: str | None = None
     tiles_geojson_path: str | None = None
-    water_manifest_path: str | None = None
     state_path: str | None = None
     discovery_windows: list[dict[str, str]] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)

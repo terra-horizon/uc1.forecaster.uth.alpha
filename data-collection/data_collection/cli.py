@@ -27,10 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--box-size-m", type=int, default=400)
     run.add_argument("--min-river-length-m", type=float, default=10_000.0)
     run.add_argument("--projected-crs", default="EPSG:32634")
-    run.add_argument("--water-threshold", default="distribution")
-    run.add_argument("--water-min-auto-threshold-pct", type=float, default=0.5)
     run.add_argument("--max-cloud-coverage", type=int, default=30)
-    run.add_argument("--refresh-water", action="store_true")
 
     validate = subparsers.add_parser("validate", help="Validate an existing collector run")
     validate.add_argument("--run-dir", required=True)
@@ -44,11 +41,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
         return 0 if report["valid"] else 1
 
-    threshold: str | float = args.water_threshold
-    try:
-        threshold = float(threshold)
-    except ValueError:
-        pass
     result = collect(CollectionRequest(
         aoi_bbox=list(args.bbox),
         run_name=args.run_name,
@@ -64,10 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         box_size_m=args.box_size_m,
         min_river_length_m=args.min_river_length_m,
         projected_crs=args.projected_crs,
-        water_threshold=threshold,
-        water_min_auto_threshold_pct=args.water_min_auto_threshold_pct,
         max_cloud_coverage=args.max_cloud_coverage,
-        refresh_water=args.refresh_water,
     ))
     print(json.dumps(result.to_dict(), indent=2))
     return 0 if result.status in {"success", "dry_run"} else 2

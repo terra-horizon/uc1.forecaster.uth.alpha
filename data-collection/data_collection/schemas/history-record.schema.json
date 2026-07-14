@@ -4,8 +4,8 @@
   "title": "TERRA UC1 collection history record",
   "type": "object",
   "required": [
-    "schema_version", "tile_id", "observation_date", "bbox", "collection_status",
-    "water_status", "water_pct", "cloud_pct", "valid_pixels", "source_scene_count",
+    "schema_version", "tile_id", "observation_date", "bbox", "collection_status", "collection_method",
+    "water_check_status", "water_status", "water_pct", "cloud_pct", "valid_pixels", "source_scene_count",
     "stac_item_ids", "asset_paths", "quality_flags", "attempt_count", "created_at",
     "updated_at", "CDOM", "Chl_a", "Color", "Cya", "DOC", "Turb", "WQI"
   ],
@@ -15,6 +15,8 @@
     "observation_date": {"type": "string", "format": "date"},
     "bbox": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number"}, {"type": "number"}], "minItems": 4, "maxItems": 4},
     "collection_status": {"enum": ["collected", "unavailable"]},
+    "collection_method": {"enum": ["all_valid_pixels_v1", "water_masked_legacy"]},
+    "water_check_status": {"enum": ["not_performed", "evaluated"]},
     "water_status": {"enum": ["water", "no_water", "unknown"]},
     "water_pct": {"type": ["number", "null"]},
     "cloud_pct": {"type": ["number", "null"]},

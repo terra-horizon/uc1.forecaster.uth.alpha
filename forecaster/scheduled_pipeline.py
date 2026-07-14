@@ -20,6 +20,7 @@ from forecast import (
 from forecaster.collection_provider import CollectionProvider, CollectionRequest, LocalCollectionProvider
 from forecaster.core.global_preprocessor import WATER_TARGET_COLS
 from forecaster.stac_exporter import StacCatalogExporter
+from forecaster.water_tile_selector import WaterTileSelector
 
 ensure_data_collection_importable()
 from data_collection.service import build_history_record as collector_history_record  # noqa: E402
@@ -164,14 +165,23 @@ class ScheduledIncrementalPipeline:
 
         history_records = self._load_json(collection_result.history_json_path, [])
         tile_records = self._load_json(collection_result.tile_records_path, [])
-        water_manifest = self._load_water_manifest(collection_result.water_manifest_path, tile_records)
-        anchor_date = latest_usable_observation_date(history_records)
-        self._log(f"Latest usable observation date: {anchor_date or 'none'}.")
+        anchor_date = latest_available_observation_date(history_records)
+        water_manifest = self._build_inference_water_manifest(
+            collection_result.tiles_geojson_path,
+            history_records,
+            anchor_date,
+        )
+        inference_history = apply_water_manifest(history_records, water_manifest)
+        usable_tiles = sorted({record["tile_id"] for record in inference_history if is_usable_observation(record)})
+        self._log(
+            f"Forecast anchor: {anchor_date or 'none'}; "
+            f"{len(usable_tiles)} tile(s) have usable historical water observations."
+        )
         forecast_created, forecast_status, stac_item_id = self._forecast(
-            state, anchor_date, tile_records, history_records, water_manifest
+            state, anchor_date, tile_records, inference_history, water_manifest
         )
         if not forecast_created:
-            self._export_collection_stac(tile_records, history_records)
+            self._export_collection_stac(tile_records, inference_history)
         self.state.save(state)
 
         new_data_available = collection_result.new_record_count > 0
@@ -220,10 +230,7 @@ class ScheduledIncrementalPipeline:
             box_size_m=self.config.box_size_m,
             min_river_length_m=self.config.min_river_length_m,
             projected_crs=self.config.projected_crs,
-            water_threshold=self.config.water_threshold,
-            water_min_auto_threshold_pct=self.config.water_min_auto_threshold_pct,
             max_cloud_coverage=self.config.max_cloud_coverage,
-            refresh_water=self.config.refresh_water,
         )
 
     def _dry_run_result(self, collection_result, state, warnings) -> ScheduledPipelineResult:
@@ -251,20 +258,70 @@ class ScheduledIncrementalPipeline:
             return default
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
-    def _load_water_manifest(self, path: str | None, tile_records: list[dict[str, Any]]) -> dict[str, Any]:
-        if path and Path(path).exists():
-            return self._load_json(path, {})
-        candidates = sorted((self.run_dir / "water").glob("water_selection_*.json")) if (self.run_dir / "water").exists() else []
-        if candidates:
-            return json.loads(candidates[-1].read_text(encoding="utf-8"))
-        return {
-            "selected_tiles": [str(record["name"]) for record in tile_records],
-            "rejected_tiles": [],
-            "tiles": [
-                {"name": record["name"], "bbox": record["bbox"], "size": record.get("size"), "selected": True, "scenes": []}
-                for record in tile_records
-            ],
+    def _build_inference_water_manifest(self, geojson_path: str | None, history_records, anchor_date):
+        if not geojson_path or not Path(geojson_path).exists() or not anchor_date:
+            return {"selected_tiles": [], "rejected_tiles": [], "tiles": [], "evaluated_dates": []}
+        relevant_dates = sorted({
+            str(record["observation_date"])
+            for record in history_records
+            if str(record["observation_date"]) <= anchor_date and has_complete_metrics(record)
+        })
+        history_path = self.run_dir / "processing" / "water" / "water_history.json"
+        persisted = self._load_json(str(history_path), {})
+        if not persisted:
+            persisted = self._migrate_legacy_water_history()
+        evaluated_dates = set(persisted.get("evaluated_dates", []))
+        missing_dates = [observed for observed in relevant_dates if observed not in evaluated_dates]
+        merged_tiles = list(persisted.get("tiles", []))
+        selector = WaterTileSelector(
+            geojson_path=geojson_path,
+            cache_path=self.run_dir / "processing" / "water" / "checks" / "unused.json",
+            water_check_interval=(relevant_dates[0], relevant_dates[-1]) if relevant_dates else (anchor_date, anchor_date),
+            reference_last_n=0,
+            threshold=self.config.water_threshold,
+            min_auto_threshold_pct=self.config.water_min_auto_threshold_pct,
+            max_cloud_coverage=self.config.max_cloud_coverage,
+            refresh=self.config.refresh_water,
+        )
+        if missing_dates:
+            check_path = self.run_dir / "processing" / "water" / "checks" / f"water_selection_{min(missing_dates)}_{max(missing_dates)}.json"
+            incremental_selector = WaterTileSelector(
+                geojson_path=geojson_path,
+                cache_path=check_path,
+                water_check_interval=(min(missing_dates), max(missing_dates)),
+                reference_last_n=0,
+                threshold=self.config.water_threshold,
+                min_auto_threshold_pct=self.config.water_min_auto_threshold_pct,
+                max_cloud_coverage=self.config.max_cloud_coverage,
+                refresh=self.config.refresh_water,
+            )
+            incremental = incremental_selector.select_tiles()
+            merged_tiles = merge_water_tiles(merged_tiles, incremental.get("tiles", []))
+            evaluated_dates.update(missing_dates)
+        manifest = selector.build_manifest_from_tiles(merged_tiles) if merged_tiles else {
+            "selected_tiles": [], "rejected_tiles": [], "tiles": []
         }
+        manifest["evaluated_dates"] = sorted(evaluated_dates)
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(manifest, indent=2, allow_nan=False), encoding="utf-8")
+        return manifest
+
+    def _migrate_legacy_water_history(self) -> dict[str, Any]:
+        merged_tiles: list[dict[str, Any]] = []
+        evaluated_dates: set[str] = set()
+        legacy_root = self.run_dir / "water"
+        for path in sorted(legacy_root.glob("water_selection_*.json")) if legacy_root.exists() else []:
+            manifest = self._load_json(str(path), {})
+            merged_tiles = merge_water_tiles(merged_tiles, manifest.get("tiles", []))
+            evaluated_dates.update(
+                str(scene.get("date"))[:10]
+                for tile in manifest.get("tiles", [])
+                for scene in tile.get("scenes", []) or []
+                if scene.get("date")
+            )
+        if merged_tiles:
+            self._log(f"Migrated {len(evaluated_dates)} legacy water-check date(s) into forecaster state.")
+        return {"tiles": merged_tiles, "evaluated_dates": sorted(evaluated_dates)}
 
     def _forecast(self, state, anchor_date, tile_records, history_records, water_manifest):
         if not self.config.run_inference:
@@ -409,19 +466,85 @@ def build_run_summary(*, new_data_available: bool, forecast_status: str, forecas
         return f"Forecast was created for anchor {forecast_anchor}."
     if forecast_status == "already_forecasted":
         return f"Latest usable observation {forecast_anchor} is already forecasted."
-    return f"Scheduled run completed. latest_usable_observation={forecast_anchor or 'none'}, last_forecast_anchor={last_forecast_anchor or 'none'}, forecast_status={forecast_status}."
+    return f"Scheduled run completed. forecast_anchor={forecast_anchor or 'none'}, last_forecast_anchor={last_forecast_anchor or 'none'}, forecast_status={forecast_status}."
 
 
-def latest_usable_observation_date(records: list[dict[str, Any]]) -> str | None:
-    usable = sorted({str(record["observation_date"]) for record in records if is_usable_observation(record)})
-    return usable[-1] if usable else None
+def latest_available_observation_date(records: list[dict[str, Any]]) -> str | None:
+    available = sorted({str(record["observation_date"]) for record in records if has_complete_metrics(record)})
+    return available[-1] if available else None
+
+
+def has_complete_metrics(record: dict[str, Any]) -> bool:
+    return all(record.get(column) is not None for column in TARGET_COLS)
 
 
 def is_usable_observation(record: dict[str, Any]) -> bool:
     return record.get("water_status") == "water" and all(record.get(column) is not None for column in TARGET_COLS)
 
 
-def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float], metrics: dict[str, Any], water_scene: dict[str, Any], stac_item_ids: list[str]) -> dict[str, Any]:
+def merge_water_tiles(existing_tiles: list[dict[str, Any]], new_tiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged = {str(tile.get("name")): dict(tile) for tile in existing_tiles}
+    for incoming in new_tiles:
+        tile_id = str(incoming.get("name"))
+        current = dict(merged.get(tile_id, {}))
+        scenes = {
+            normalize_date(scene.get("date", "")): dict(scene)
+            for scene in current.get("scenes", []) or []
+            if normalize_date(scene.get("date", ""))
+        }
+        for scene in incoming.get("scenes", []) or []:
+            observed = normalize_date(scene.get("date", ""))
+            if observed:
+                scenes[observed] = dict(scene)
+        current.update({key: value for key, value in incoming.items() if key != "scenes"})
+        current["scenes"] = [scenes[key] for key in sorted(scenes)]
+        merged[tile_id] = current
+    return [merged[key] for key in sorted(merged)]
+
+
+def apply_water_manifest(history_records: list[dict[str, Any]], manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    scene_index = {
+        (str(tile.get("name")), normalize_date(scene.get("date", ""))): scene
+        for tile in manifest.get("tiles", [])
+        for scene in tile.get("scenes", []) or []
+        if normalize_date(scene.get("date", ""))
+    }
+    evaluated_dates = set(manifest.get("evaluated_dates", []))
+    evaluated = []
+    for source in history_records:
+        record = dict(source)
+        observed = str(record.get("observation_date"))
+        scene = scene_index.get((str(record.get("tile_id")), observed))
+        flags = set(record.get("quality_flags") or []) - {"cloudy", "no_valid_pixels"}
+        if scene:
+            water_pct = safe_float(scene.get("water_pct"))
+            cloud_pct = safe_float(scene.get("cloud_pct"))
+            valid_pixels = int(scene.get("valid_pixels") or 0)
+            record.update({
+                "water_check_status": "evaluated",
+                "water_status": "water" if water_pct is not None and water_pct > 0 and valid_pixels > 0 else "no_water",
+                "water_pct": water_pct,
+                "cloud_pct": cloud_pct,
+                "valid_pixels": valid_pixels,
+            })
+            if cloud_pct is not None and cloud_pct > 30:
+                flags.add("cloudy")
+            if valid_pixels == 0:
+                flags.add("no_valid_pixels")
+        elif observed in evaluated_dates:
+            record.update({
+                "water_check_status": "evaluated",
+                "water_status": "unknown",
+                "water_pct": None,
+                "cloud_pct": None,
+                "valid_pixels": 0,
+            })
+        record["quality_flags"] = sorted(flags)
+        evaluated.append(record)
+    return evaluated
+
+
+def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float], metrics: dict[str, Any], stac_item_ids: list[str], water_scene: dict[str, Any] | None = None) -> dict[str, Any]:
     return collector_history_record(
         tile_id=tile_id,
         observed_date=observed_date,

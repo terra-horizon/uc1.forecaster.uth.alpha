@@ -12,9 +12,10 @@
 `history/global_history.json` is a plain JSON array. The same rows are written to `history/global_history.csv` with a fixed column order. Each record contains:
 
 - Tile, observation date, bbox, timestamps, and collection attempt count.
-- `collection_status`: `collected` or `unavailable`.
-- `water_status`: `water`, `no_water`, or `unknown`.
-- Water percentage, cloud percentage, valid pixels, source scene count, and STAC item IDs.
+- `collection_status`: `collected` when all seven metrics are available, otherwise `unavailable`.
+- `collection_method: all_valid_pixels_v1`, identifying statistics collected without a water mask. Older `water_masked_legacy` rows are retained but considered incomplete and are replaced by upsert during backfill.
+- `water_check_status: not_performed` and `water_status: unknown`; water eligibility is intentionally not decided by the collector.
+- Source scene count and STAC item IDs. Water percentage, cloud percentage, and valid pixels remain `null` or zero until processing evaluates water history.
 - Asset paths and quality flags.
 - `CDOM`, `Chl_a`, `Color`, `Cya`, `DOC`, `Turb`, and `WQI`.
 
@@ -32,6 +33,5 @@ The JSON representations are defined by:
 - `global-history.schema.json`
 - `history-record.schema.json`
 - `river-tiles.schema.json`
-- `water-selection.schema.json`
 
-The current connector is local Python. A future HTTP service should accept and return these same request/result shapes and make the referenced history artifacts available to the processing pipeline.
+The current connector is local Python. A future HTTP service should accept and return these same request/result shapes and make the referenced history artifacts available to the processing pipeline. Processing may enrich records with evaluated water metadata in memory or in processing-owned artifacts, but it must not rewrite collector history.

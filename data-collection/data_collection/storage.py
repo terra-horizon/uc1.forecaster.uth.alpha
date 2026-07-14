@@ -11,12 +11,15 @@ from typing import Any, Iterable
 
 
 TARGET_COLUMNS = ("CDOM", "Chl_a", "Color", "Cya", "DOC", "Turb", "WQI")
+CURRENT_COLLECTION_METHOD = "all_valid_pixels_v1"
 HISTORY_COLUMNS = (
     "schema_version",
     "tile_id",
     "observation_date",
     "bbox",
     "collection_status",
+    "collection_method",
+    "water_check_status",
     "water_status",
     "water_pct",
     "cloud_pct",
@@ -127,8 +130,12 @@ class HistoryStore:
 
 def is_terminal(record: dict[str, Any]) -> bool:
     status = record.get("collection_status")
-    return status in TERMINAL_STATUSES or status is None
+    return status in TERMINAL_STATUSES and record.get("collection_method") == CURRENT_COLLECTION_METHOD
 
 
 def is_usable(record: dict[str, Any]) -> bool:
     return record.get("water_status") == "water" and all(record.get(column) is not None for column in TARGET_COLUMNS)
+
+
+def has_complete_metrics(record: dict[str, Any]) -> bool:
+    return all(record.get(column) is not None for column in TARGET_COLUMNS)

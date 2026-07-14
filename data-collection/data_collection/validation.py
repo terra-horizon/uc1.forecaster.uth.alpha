@@ -42,10 +42,4 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
                 location = "/".join(str(part) for part in error.absolute_path)
                 errors.append(f"{data_path}:{location}: {error.message}")
         checked.append(str(data_path))
-    for water_path in sorted((run_dir / "water").glob("water_selection_*.json")):
-        schema = json.loads((SCHEMA_ROOT / "water-selection.schema.json").read_text(encoding="utf-8"))
-        value = json.loads(water_path.read_text(encoding="utf-8"))
-        for error in Draft202012Validator(schema).iter_errors(value):
-            errors.append(f"{water_path}: {error.message}")
-        checked.append(str(water_path))
     return {"valid": not errors, "checked": checked, "errors": errors}

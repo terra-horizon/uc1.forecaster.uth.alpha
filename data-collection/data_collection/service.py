@@ -17,16 +17,15 @@ from .models import CollectionRequest, CollectionResult
 from .river_tiles import RiverTileExtractor, RiverTileExtractorConfig
 from .storage import (
     TARGET_COLUMNS,
+    CURRENT_COLLECTION_METHOD,
     HistoryStore,
     is_terminal,
-    is_usable,
-    normalize_date,
+    has_complete_metrics,
     read_json,
     safe_float,
     utc_now,
     write_json,
 )
-from .water import WaterTileSelector
 
 
 class CollectionService:
@@ -35,12 +34,10 @@ class CollectionService:
         *,
         discovery_factory: Callable[[int], Any] | None = None,
         statistics_factory: Callable[..., Any] = StatisticalCollection,
-        water_selector_factory: Callable[..., Any] = WaterTileSelector,
         tile_extractor_factory: Callable[[RiverTileExtractorConfig], Any] = RiverTileExtractor,
     ):
         self.discovery_factory = discovery_factory or (lambda cloud: CDSEStacDiscovery(max_cloud_coverage=cloud))
         self.statistics_factory = statistics_factory
-        self.water_selector_factory = water_selector_factory
         self.tile_extractor_factory = tile_extractor_factory
         self.request: CollectionRequest | None = None
         self.run_dir = Path()
@@ -118,7 +115,6 @@ class CollectionService:
         failed_units: list[dict[str, Any]] = []
         records_written = 0
         collected_dates: set[str] = set()
-        water_manifest_path: Path | None = None
         if missing_dates:
             tiles_to_process = [
                 tile for tile in tile_records
@@ -126,8 +122,6 @@ class CollectionService:
             ]
             if request.max_tiles_per_run:
                 tiles_to_process = tiles_to_process[: request.max_tiles_per_run]
-            water_manifest, water_manifest_path = self._water_manifest(tiles_geojson, missing_dates)
-            water_index = build_water_index(water_manifest)
             for tile_number, tile in enumerate(tiles_to_process, start=1):
                 tile_id = str(tile["name"])
                 tile_dates = [observed for observed in missing_dates if not _has_terminal(history, tile_id, observed)]
@@ -153,7 +147,6 @@ class CollectionService:
                         observed_date=observed,
                         bbox=list(tile["bbox"]),
                         metrics=metrics.get(observed, {}),
-                        water_scene=water_index.get((tile_id, observed), {}),
                         stac_item_ids=item_ids.get(observed) or state.get("stac_item_ids", {}).get(observed, []),
                         previous=_find_record(history, tile_id, observed),
                     )
@@ -186,13 +179,13 @@ class CollectionService:
             state["backfill_complete"] = True
         self._save_state(state)
 
-        latest = latest_usable_observation(history)
+        latest = latest_available_observation(history)
         if missing_dates and records_written:
-            summary = f"Collected or updated {records_written} tile-date record(s); latest usable observation is {latest or 'none'}."
+            summary = f"Collected or updated {records_written} tile-date record(s); latest available observation is {latest or 'none'}."
         elif missing_dates and failed_units:
             summary = f"No records were written; {len(failed_units)} tile-date unit(s) remain retryable."
         else:
-            summary = f"No new satellite data required collection; latest usable observation is {latest or 'none'}."
+            summary = f"No new satellite data required collection; latest available observation is {latest or 'none'}."
         self._log(summary)
         result = self._result(
             status="partial" if failed_units else "success",
@@ -208,7 +201,6 @@ class CollectionService:
             warnings=warnings,
             tile_records_path=tile_records_path,
             tiles_geojson_path=tiles_geojson,
-            water_manifest_path=water_manifest_path,
         )
         write_json(self.run_dir / "collection" / "collection_run_result.json", result.to_dict())
         return result
@@ -307,20 +299,6 @@ class CollectionService:
         }
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
-    def _water_manifest(self, geojson_path: Path, dates: list[str]) -> tuple[dict[str, Any], Path]:
-        path = self.run_dir / "water" / f"water_selection_{min(dates)}_{max(dates)}.json"
-        selector = self.water_selector_factory(
-            geojson_path=geojson_path,
-            cache_path=path,
-            water_check_interval=(min(dates), max(dates)),
-            reference_last_n=0,
-            threshold=self.request.water_threshold,
-            min_auto_threshold_pct=self.request.water_min_auto_threshold_pct,
-            max_cloud_coverage=self.request.max_cloud_coverage,
-            refresh=self.request.refresh_water,
-        )
-        return selector.select_tiles(), path
-
     def _collect_metrics(self, tile_id: str, bbox: list[float], dates: list[str]) -> dict[str, dict[str, Any]]:
         work_dir = self.run_dir / "collector_work" / tile_id / f"{min(dates)}_{max(dates)}"
         if work_dir.exists():
@@ -362,7 +340,7 @@ class CollectionService:
             )
             store.write(sorted(records, key=lambda record: str(record["observation_date"])))
 
-    def _result(self, *, status: str, summary: str, state: dict[str, Any], windows: list[tuple[str, str]], warnings: list[dict[str, Any]], available_dates=None, missing_dates=None, collected_dates=None, new_record_count=0, failed_units=None, latest=None, tile_records_path=None, tiles_geojson_path=None, water_manifest_path=None) -> CollectionResult:
+    def _result(self, *, status: str, summary: str, state: dict[str, Any], windows: list[tuple[str, str]], warnings: list[dict[str, Any]], available_dates=None, missing_dates=None, collected_dates=None, new_record_count=0, failed_units=None, latest=None, tile_records_path=None, tiles_geojson_path=None) -> CollectionResult:
         return CollectionResult(
             status=status,
             run_dir=str(self.run_dir),
@@ -373,12 +351,11 @@ class CollectionService:
             collected_dates=collected_dates or [],
             new_record_count=new_record_count,
             failed_units=failed_units or [],
-            latest_usable_observation=latest,
+            latest_available_observation=latest,
             history_json_path=str(self.run_dir / "history" / "global_history.json"),
             history_csv_path=str(self.run_dir / "history" / "global_history.csv"),
             tile_records_path=str(tile_records_path) if tile_records_path else None,
             tiles_geojson_path=str(tiles_geojson_path) if tiles_geojson_path else None,
-            water_manifest_path=str(water_manifest_path) if water_manifest_path else None,
             state_path=str(self.run_dir / "collection" / "state.json"),
             discovery_windows=[{"start_date": start, "end_date": end} for start, end in windows],
             warnings=warnings,
@@ -429,16 +406,8 @@ def compute_discovery_windows(request: CollectionRequest, state: dict[str, Any],
     return windows
 
 
-def build_water_index(manifest: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
-    return {
-        (str(tile.get("name")), normalize_date(scene.get("date", ""))): scene
-        for tile in manifest.get("tiles", [])
-        for scene in tile.get("scenes", []) or []
-        if normalize_date(scene.get("date", ""))
-    }
-
-
-def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float], metrics: dict[str, Any], water_scene: dict[str, Any], stac_item_ids: list[str], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float], metrics: dict[str, Any], stac_item_ids: list[str], previous: dict[str, Any] | None = None, water_scene: dict[str, Any] | None = None) -> dict[str, Any]:
+    water_scene = water_scene or {}
     water_pct = safe_float(water_scene.get("water_pct"))
     cloud_pct = safe_float(water_scene.get("cloud_pct"))
     valid_pixels = int(water_scene.get("valid_pixels") or 0)
@@ -449,11 +418,11 @@ def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float],
     flags = []
     if cloud_pct is not None and cloud_pct > 30:
         flags.append("cloudy")
-    if valid_pixels == 0:
+    if water_scene and valid_pixels == 0:
         flags.append("no_valid_pixels")
     if any(value is None for value in values.values()):
         flags.append("missing_metrics")
-    status = "collected" if water_status == "water" and all(value is not None for value in values.values()) else "unavailable"
+    status = "collected" if all(value is not None for value in values.values()) else "unavailable"
     now = utc_now()
     record = {
         "schema_version": "1.0.0",
@@ -461,11 +430,13 @@ def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float],
         "observation_date": observed_date,
         "bbox": bbox,
         "collection_status": status,
+        "collection_method": CURRENT_COLLECTION_METHOD,
+        "water_check_status": "evaluated" if water_scene else "not_performed",
         "water_status": water_status,
         "water_pct": water_pct,
         "cloud_pct": cloud_pct,
         "valid_pixels": valid_pixels,
-        "source_scene_count": 1 if water_scene else 0,
+        "source_scene_count": len(set(stac_item_ids)),
         "stac_item_ids": sorted(set(stac_item_ids)),
         "asset_paths": dict((previous or {}).get("asset_paths") or {}),
         "quality_flags": sorted(set(flags)),
@@ -477,8 +448,8 @@ def build_history_record(*, tile_id: str, observed_date: str, bbox: list[float],
     return record
 
 
-def latest_usable_observation(history: list[dict[str, Any]]) -> str | None:
-    dates = sorted(str(record["observation_date"]) for record in history if is_usable(record))
+def latest_available_observation(history: list[dict[str, Any]]) -> str | None:
+    dates = sorted(str(record["observation_date"]) for record in history if has_complete_metrics(record))
     return dates[-1] if dates else None
 
 
@@ -487,7 +458,9 @@ def upgrade_history_records(history: list[dict[str, Any]]) -> list[dict[str, Any
     for original in history:
         record = dict(original)
         record.setdefault("schema_version", "1.0.0")
-        record.setdefault("collection_status", "collected" if is_usable(record) else "unavailable")
+        record.setdefault("collection_status", "collected" if has_complete_metrics(record) else "unavailable")
+        record.setdefault("collection_method", "water_masked_legacy")
+        record.setdefault("water_check_status", "evaluated" if record.get("water_status") in {"water", "no_water"} else "not_performed")
         record.setdefault("attempt_count", 1)
         record.setdefault("asset_paths", {})
         record.setdefault("quality_flags", [])
