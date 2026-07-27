@@ -3,9 +3,10 @@
 This deployment is **Alpha 1 of TERRA Product Chain 1** for Use Case 1:
 assessment of water contamination in coastal areas and in the water cycle.
 
-It is a Dockerized batch pipeline that transforms Sentinel-2 and Sentinel-3
-observations for an area of interest into prepared water-quality time series
-and short-term forecasts.
+It is a Dockerized, one-shot scheduled pipeline that transforms Sentinel-2 and
+Sentinel-3 observations for an area of interest into prepared water-quality
+time series and short-term forecasts. It stores queryable records in MongoDB
+and durable JSON/GeoJSON/STAC artifacts in a configured MinIO bucket.
 
 ## Product Chain Components
 
@@ -28,7 +29,8 @@ component.
 * Collect Sentinel-2 and Sentinel-3 historical metrics and target-date images.
 * Interpolate missing observations to a 5-day cadence.
 * Run model inference for CDOM, Chl-a, Color, Cya, DOC, Turbidity, WQI, and surface temperature.
-* Export inference plans, CSV/JSON forecasts, and plots.
+* Persist raw observations, model-ready features, forecasts, and run
+  provenance through configurable MongoDB and MinIO endpoints.
 
 ## Current Scope
 
@@ -36,12 +38,19 @@ This alpha release is a CLI-based Dockerized forecasting chain. It does not
 expose an HTTP API, include OpenMeteo meteorological inputs, or implement the
 complete Hydrological and Water-Quality Digital Twin.
 
-## Main Entry Point
+## Operational Entry Point
+
+The deployment entrypoint is `forecaster.scheduled_pipeline`. Each invocation
+restores the AOI state, collects missing or retryable observations, persists
+the durable artifacts, and runs inference only when a new forecast is needed.
 
 ```bash
-python forecast.py \
+docker compose --env-file .env run --rm forecaster \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --target-date 2026-05-27 \
-  --run-name sperchios_test_run \
-  --output-root inference_results
+  --run-name uc1-dev
 ```
+
+`forecaster.inference` remains available for direct, local one-off inference;
+it does not replace the scheduled storage workflow. See
+[Deployment](deployment.md), [Configuration](configuration.md), and the
+[repository data contract](https://github.com/terra-horizon/uc1.forecaster.uth.alpha/blob/main/collector/DATA_CONTRACT.md).

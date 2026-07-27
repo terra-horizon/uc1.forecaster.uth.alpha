@@ -84,14 +84,17 @@ component in Alpha 1.
 
 **Status:** Implemented in Alpha 1
 
-The `forecast.py` entry point coordinates the implemented components and
-records their outcomes. Each run can produce:
+The `forecaster.scheduled_pipeline` coordinates incremental collection,
+persistence, and forecast triggering. It calls `forecaster.inference` for the
+core model work. Each run can produce:
 
 * the extracted river-tile GeoJSON and water-selection manifest;
 * exact target-date satellite images when available;
 * an inference plan and structured pipeline status;
 * per-tile and aggregate forecast files in JSON and CSV formats;
 * forecast plots.
+* MongoDB documents and MinIO JSON/GeoJSON/STAC artifacts linked by AOI, tile,
+  dates, run IDs, and artifact references.
 
 This capability is documented separately because it connects and deploys the
 domain components rather than representing an additional water-science model.

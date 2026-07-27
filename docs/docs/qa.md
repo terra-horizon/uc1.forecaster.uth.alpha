@@ -8,9 +8,11 @@ Run the repository test suite with:
 python3 -m pytest -q
 ```
 
-The default suite includes deterministic pipeline scenarios that control the
-external OSM and CDSE boundaries. Generated raw results are written under
-`tests/results/<scenario>/latest/` and are ignored by Git.
+The current offline suite contains 40 passing tests and one intentionally
+skipped credentialed live test. It includes deterministic direct-inference
+scenarios, collector contract validation, scheduled-pipeline behavior, and
+mocked MongoDB/MinIO persistence boundaries. Generated raw results are written
+under `tests/results/<scenario>/latest/` and are ignored by Git.
 
 Several scenarios deliberately produce a `failed` pipeline status to verify
 that invalid or unavailable inputs are handled safely and recorded with the
@@ -26,7 +28,9 @@ RUN_LIVE_PIPELINE_TESTS=1 python3 -m pytest -m live -q
 ```
 
 The live test uses real OSM and CDSE services, so its duration and target-date
-image availability depend on external systems.
+image availability depend on external systems. It does not currently validate
+the UTH MongoDB/MinIO deployment; that proof is a separate, credentialed
+release check.
 
 ## Scenario Report
 
@@ -55,13 +59,19 @@ docker build -t uc1-forecaster:local .
 Verify the CLI entrypoint:
 
 ```bash
-./scripts/docker-run.sh --help
+docker compose --env-file .env run --rm forecaster --help
 ```
 
 Verify that local secrets are not copied into the image:
 
 ```bash
-UC1_REMOVE_CONTAINER=1 UC1_DOCKER_ARGS="--entrypoint sh" ./scripts/docker-run.sh -c 'test ! -f /app/.env'
+docker compose --env-file .env run --rm --entrypoint sh forecaster -c 'test ! -f /app/.env'
+```
+
+Validate Compose configuration without connecting to external services:
+
+```bash
+docker compose --env-file .env.example config --quiet
 ```
 
 ## Vulnerability Checks

@@ -63,9 +63,25 @@ Before data reaches the model, it goes through several critical pre-processing s
 
 ---
 
-## Pipeline Flow
+## Execution Model
 
-The entire inference process is orchestrated via the central `forecast.py` script. The flow is as follows:
+The repository has two execution paths which share the same inference engine:
+
+```text
+forecaster.scheduled_pipeline  ->  forecaster.inference  ->  model forecast
+       daily / on-demand             core preprocessing
+       collection + storage          + ML inference
+```
+
+- `forecaster.scheduled_pipeline` is the operational entrypoint. Use it for
+  daily scheduling and on-demand updates. It restores prior state, collects
+  only missing/retryable observations, updates MongoDB and MinIO, and calls
+  the inference engine only when a forecast is needed.
+- `forecaster.inference` is the core one-off inference engine. Use it for
+  development, debugging, or a manual forecast for one target date. It writes
+  local run outputs but does not perform the incremental MongoDB/MinIO workflow.
+
+The operational flow is:
 
 1. **Area Definition**: You define an Area of Interest (AOI bounding box) and a target anchor date.
 2. **Tile Extraction**: The pipeline automatically chops the AOI into river tiles.
@@ -75,12 +91,14 @@ The entire inference process is orchestrated via the central `forecast.py` scrip
 6. **Inference**: The pre-processed 5-day time series is passed to the Global BiLSTM model to forecast the future state of the water quality indicators.
 7. **Export**: Predictions are saved as `.json` and `.csv` files, alongside visual plots showing history vs. forecast.
 
-The scheduled pipeline uses the tracked [standalone data-collection module](data-collection/README.md) through a local provider contract. The collector gathers every available tile/date record. The forecaster owns historical water screening and selects tiles with enough usable water observations before inference. Collection state and history remain independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later.
+The scheduled pipeline uses the tracked [standalone collector module](collector/README.md) through a local provider contract. The collector gathers every available tile/date record. The forecaster owns historical water screening and selects tiles with enough usable water observations before inference. Collection state and history remain independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later.
 
-### Example Inference Run
+### Direct one-off inference
+
+This is optional and does not replace the scheduled pipeline in deployment:
 
 ```bash
-python forecast.py \
+python -m forecaster.inference \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
   --target-date 2026-05-27 \
   --run-name "sperchios_test_run" \
@@ -113,9 +131,19 @@ CDSE_BACKUP_2_CLIENT_SECRET
 
 For local development, place credentials in a repository-root `.env` file. The file is ignored by Git and excluded from the Docker build context.
 
+Copy the tracked [`.env.example`](.env.example) before editing it. It is the
+only configuration template required by this repository: MongoDB and MinIO may
+be remote, local, or supplied by another Docker deployment.
+
 ---
 
 ## Docker Usage
+
+The Docker image runs `forecaster.scheduled_pipeline` by default. One container
+invocation performs one backfill or incremental update and then exits. A server
+scheduler such as cron or a systemd timer should trigger it periodically.
+
+### Build and inspect the image
 
 Build the local image:
 
@@ -123,37 +151,167 @@ Build the local image:
 docker build -t uc1-forecaster:local .
 ```
 
-Show the CLI help:
+Show the operational CLI help:
 
 ```bash
-./scripts/docker-run.sh --help
+docker compose run --rm forecaster --help
 ```
 
-Run inference with credentials from `.env` and write outputs to a mounted host directory:
+### Storage configuration
+
+The container only needs application-level environment variables. It does not
+contain infrastructure addresses, SSH keys, tunnels, root credentials, or
+MongoDB/MinIO servers. The configured endpoints may be remote, locally hosted,
+on another Docker network, or reached through a host-side SSH tunnel.
+
+| Variable | Purpose |
+| --- | --- |
+| `TERRA_STORAGE_ENABLED` | Set to `true` to require remote MongoDB and MinIO persistence. |
+| `MONGO_URI` | Complete MongoDB URI, including the database and authentication source. |
+| `MINIO_ENDPOINT` | MinIO S3 API URL, for example `http://minio:9000`. |
+| `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | MinIO application credentials. |
+| `MINIO_BUCKET_NAME` | Existing MinIO bucket used by the pipeline. |
+| `MINIO_VERIFY_TLS` | Keep `true` by default; set `false` only for a trusted development endpoint with a self-signed certificate. |
+| `MINIO_CA_BUNDLE` | Optional path to a trusted CA certificate inside the container. |
+| `TERRA_AOI_ID` | Stable physical study-area identity; it is not an environment label. |
+
+### Connect to storage services
+
+Copy `.env.example` to `.env` and replace its placeholders. The app uses the
+same configuration regardless of where MongoDB and MinIO are hosted.
+
+Before running the forecaster, the operator must provision a MongoDB database
+and application user, plus a MinIO bucket and application access key. The
+pipeline creates its collections and indexes automatically, but never creates
+infrastructure users, databases, buckets, or access keys.
+
+Run a read-only preflight before processing data:
 
 ```bash
-./scripts/docker-run.sh \
+docker compose --env-file .env run --rm --entrypoint python forecaster scripts/storage_health.py
+```
+
+For a host-side SSH tunnel, start the tunnel on the host and set `MONGO_URI`
+to a URI whose host is `host.docker.internal` (Docker Desktop) and whose port
+is the tunnel's local port. MinIO does not require a tunnel unless your own
+network policy requires one. The application never creates a tunnel itself.
+
+If MongoDB or MinIO is unreachable, the preflight and pipeline exit with a
+credential-safe error naming the failed target and the relevant configuration
+variables. Credentials are never included in those messages.
+
+The image runs as a non-root user and uses `forecaster.scheduled_pipeline` as
+its entrypoint. When storage is enabled, it writes queryable records to MongoDB
+and JSON/GeoJSON/STAC artifacts to MinIO.
+
+### Run direct inference in Docker
+
+For manual debugging or a one-off target date, override the operational
+entrypoint explicitly:
+
+```bash
+docker compose --env-file .env run --rm --entrypoint python forecaster \
+  -m forecaster.inference \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
   --target-date 2026-05-27 \
-  --run-name sperchios_test_run \
-  --output-root /app/inference_results
+  --run-name manual-inference
 ```
 
-The image runs as a non-root user and uses `forecast.py` as its entrypoint.
+This command produces local run outputs only; use the scheduled pipeline for
+incremental persistence and normal operations.
 
-The helper script assigns a container name automatically with the format `uc1-forecaster-YYYYMMDD-HHMMSS`, mounts `inference_results/` to `/app/inference_results`, and passes `.env` when the file exists. By default, the stopped container remains visible in Docker Desktop with that generated name. Set `UC1_REMOVE_CONTAINER=1` when you want Docker to remove it automatically after the run.
+### Backfill and incremental runs
 
-Override the defaults when needed:
+The scheduled CLI defaults to `--history-start 2016-01-01` and uses today as
+the target date when `--target-date` is omitted. A full historical backfill
+requires `--backfill-all`, which processes the interval in discovery chunks:
 
 ```bash
-UC1_CONTAINER_NAME=uc1-forecaster-20260602 UC1_IMAGE_NAME=uc1-forecaster:local ./scripts/docker-run.sh --help
+docker compose --env-file .env run --rm forecaster \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name uc1-dev \
+  --history-start 2016-01-01 \
+  --backfill-all
 ```
 
-Run with automatic cleanup:
+For another deployment, use the same image and its own `.env`, with a stable
+run label such as `uc1-prod`.
+
+### Daily scheduling
+
+The container is intentionally one-shot. Schedule the same Compose command
+externally, for example with cron, after the historical backfill has completed:
+
+```cron
+15 2 * * * cd /path/to/uc1 && docker compose --env-file /secure/path/uc1.env run --rm forecaster --bbox 22.433493 38.837552 22.569555 38.894223 --run-name uc1-prod --output-root /app/data/inference_runs >> /var/log/uc1-forecast.log 2>&1
+```
+
+Each scheduled invocation restores the AOI state, checks MongoDB for existing
+tile/date records, collects only missing or retryable units, and updates
+MongoDB and MinIO idempotently.
+
+After the backfill, a normal invocation performs an incremental update. It
+checks existing MongoDB observations and collects only missing or retryable
+tile/date units:
 
 ```bash
-UC1_REMOVE_CONTAINER=1 ./scripts/docker-run.sh --help
+docker compose --env-file .env run --rm forecaster \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name uc1-dev
 ```
+
+Use a bounded commissioning run:
+
+```bash
+docker compose --env-file .env run --rm forecaster \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name uc1-dev \
+  --history-start 2026-06-05 \
+  --target-date 2026-06-30 \
+  --max-days-per-run 1 \
+  --max-tiles-per-run 1 \
+  --skip-inference
+```
+
+### Scheduled CLI parameters
+
+| Parameter | Description |
+| --- | --- |
+| `--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | Required AOI bounding box. |
+| `--run-name NAME` | Required stable run label, for example `uc1-dev` or `uc1-prod`. |
+| `--output-root PATH` | Local staging root mounted into the container. |
+| `--history-start YYYY-MM-DD` | Start date for discovery; defaults to `2016-01-01`. |
+| `--target-date YYYY-MM-DD` | End/target date; defaults to today. |
+| `--backfill-all` | Process all discovery windows from the history start to the target date. |
+| `--discovery-chunk-days N` | Size of each discovery window; defaults to `31`. |
+| `--max-days-per-run N` | Limit missing dates processed in one invocation. |
+| `--max-tiles-per-run N` | Limit tiles processed in one invocation. |
+| `--dry-run` | Discover and report missing dates without collecting or writing data products. |
+| `--skip-inference` | Collect/update data without running the forecast model. |
+| `--stac-base-url URL` | Optional base URL used in exported STAC links. |
+
+### Storage layout
+
+Stable AOI assets are stored once under `aoi/`. Canonical observations,
+preprocessed features, and forecasts are stored under their AOI-level data
+prefixes. Execution results and logs are stored under `runs/<run-id>/`.
+
+```text
+terra-uc1/<aoi-id>/
+├── aoi/                 # tiles, GeoJSON, STAC geometry, collection state
+├── observations/        # raw observation JSON keyed by date
+├── preprocessed/        # model-ready feature JSON
+├── forecasts/           # forecast JSON keyed by forecast run
+└── runs/<run-id>/       # result, state, logs, and run provenance
+```
+
+MongoDB stores queryable records with unique AOI/tile/date indexes. Each
+record stores an artifact reference containing the MinIO bucket, object key,
+and SHA-256 checksum. The complete contract is documented in
+[`collector/DATA_CONTRACT.md`](collector/DATA_CONTRACT.md).
+
+Inspect objects through your MinIO console or any S3-compatible client using
+the endpoint and application credentials configured in `.env`.
 
 ---
 
@@ -219,3 +377,9 @@ https://terra-horizon.github.io/uc1.forecaster.uth.alpha/
 ```
 
 This setup keeps documentation changes inside this UC1 repository. The central `terra-horizon.github.io` portal is not modified by this repository.
+
+---
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).

@@ -1,20 +1,28 @@
 # TERRA UC1 Data Collection
 
-This folder is the standalone data-collection module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state. It does not decide whether a tile contains water; that check belongs to the forecasting pipeline.
+This folder is the standalone collector module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state. It does not decide whether a tile contains water; that check belongs to the forecasting pipeline.
+
+For normal deployment, run the repository-level
+`forecaster.scheduled_pipeline`; it invokes this module and persists results to
+configured MongoDB and MinIO endpoints. Use this CLI when developing or
+validating the collector in isolation.
 
 ## Install
 
 Create an environment and install the package from this folder:
 
 ```bash
-cd data-collection
+cd collector
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -e ".[test]"
-cp .env.example .env
 ```
 
-Set `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` in `.env`. Optional backup credentials use `CDSE_BACKUP_CLIENT_ID`, `CDSE_BACKUP_CLIENT_SECRET`, and numbered pairs through `CDSE_BACKUP_9_*`. Credentials and tokens are never written to output files or logs.
+Create the repository-root `.env` from `../.env.example`, then set
+`CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET`. Optional backup credentials use
+`CDSE_BACKUP_CLIENT_ID`, `CDSE_BACKUP_CLIENT_SECRET`, and numbered pairs
+through `CDSE_BACKUP_9_*`. Credentials and tokens are never written to output
+files or logs.
 
 ## Run
 
@@ -88,4 +96,6 @@ The forecasting repository currently calls the same service through `LocalCollec
 python3 -m pytest -q
 ```
 
-Live CDSE calls are not part of the default test suite.
+Live CDSE calls are not part of the default test suite. See
+[`DATA_CONTRACT.md`](DATA_CONTRACT.md) for the collector-to-forecaster and
+storage data model.

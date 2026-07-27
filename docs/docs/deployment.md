@@ -17,14 +17,43 @@ Release images are published to GitHub Container Registry from release tags.
 docker build -t uc1-forecaster:local .
 ```
 
-## Local Run
+## Configure external dependencies
+
+Copy `.env.example` to `.env` and configure existing CDSE, MongoDB, and MinIO
+credentials. The image runs only the forecaster; it does not start MongoDB or
+MinIO. The same variables work for remote services, local services, or services
+available through a host-side SSH tunnel.
+
+Run the storage preflight before processing data:
 
 ```bash
-./scripts/docker-run.sh \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --target-date 2026-05-27 \
-  --run-name sperchios_test_run \
-  --output-root /app/inference_results
+docker compose --env-file .env run --rm --entrypoint python forecaster scripts/storage_health.py
 ```
 
-The helper script names containers as `uc1-forecaster-YYYYMMDD-HHMMSS`, mounts `inference_results/`, and passes `.env` when present. The stopped container remains visible in Docker Desktop by default; set `UC1_REMOVE_CONTAINER=1` for automatic cleanup. Set `UC1_CONTAINER_NAME`, `UC1_IMAGE_NAME`, or `UC1_OUTPUT_DIR` to override the other defaults.
+## Scheduled run
+
+```bash
+docker compose --env-file .env run --rm forecaster \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name uc1-dev
+```
+
+Compose mounts `data/inference_runs/` to `/app/data/inference_runs` by default.
+The first run discovers missing history; add `--backfill-all` for a full
+historical backfill. Normal later runs are incremental and idempotent.
+
+Use a server scheduler to execute the same one-shot Compose command with a
+stable `uc1-prod` run label. Store the production `.env` outside source control
+and deploy an immutable image tag.
+
+## Direct one-off inference
+
+For debugging without the MongoDB/MinIO persistence workflow:
+
+```bash
+docker compose --env-file .env run --rm --entrypoint python forecaster \
+  -m forecaster.inference \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --target-date 2026-05-27 \
+  --run-name manual-inference
+```
