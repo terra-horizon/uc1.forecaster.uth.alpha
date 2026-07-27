@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from forecast import AOIInferenceConfig, AOIInferencePipeline
+from forecaster.inference import AOIInferenceConfig, AOIInferencePipeline
 from tests.scenario_support import scenario_dir
 
 

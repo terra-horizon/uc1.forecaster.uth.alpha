@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from forecast import AOIInferenceConfig, AOIInferencePipeline, PipelineExecutionError
+from forecaster.inference import AOIInferenceConfig, AOIInferencePipeline, PipelineExecutionError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -169,8 +169,8 @@ def execute_scenario(
 
     ScenarioSelector.manifest = selector_manifest
     with ExitStack() as stack:
-        stack.enter_context(patch("forecast.RiverTileExtractor", extractor))
-        stack.enter_context(patch("forecast.WaterTileSelector", ScenarioSelector))
+        stack.enter_context(patch("forecaster.inference.RiverTileExtractor", extractor))
+        stack.enter_context(patch("forecaster.inference.WaterTileSelector", ScenarioSelector))
         stack.enter_context(patch.object(AOIInferencePipeline, "download_target_date_images", image_downloads))
         stack.enter_context(patch.object(AOIInferencePipeline, "prepare_feature_csvs", return_value=features))
         if not real_model:

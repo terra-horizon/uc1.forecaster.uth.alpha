@@ -91,9 +91,9 @@ class ImageCollectionTests(unittest.TestCase):
 
     def test_cli_image_key_parser_defaults_and_unknown_key(self):
         try:
-            from forecast import DEFAULT_IMAGE_KEYS, parse_image_keys
+            from forecaster.inference import DEFAULT_IMAGE_KEYS, parse_image_keys
         except ModuleNotFoundError as exc:
-            self.skipTest(f"forecast dependencies unavailable: {exc}")
+            self.skipTest(f"inference dependencies unavailable: {exc}")
 
         self.assertIn("true_color", DEFAULT_IMAGE_KEYS)
         self.assertIn("surface_temperature", DEFAULT_IMAGE_KEYS)

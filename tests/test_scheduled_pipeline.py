@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -102,6 +103,79 @@ class FakeCollectionProvider:
             tiles_geojson_path=str(geojson_path),
             state_path=str(collection_state),
         )
+
+
+class FakeRemoteStorage:
+    """In-memory boundary double for scheduled MongoDB/MinIO persistence."""
+
+    def __init__(self, *, aoi_id: str = "test-aoi"):
+        self.enabled = True
+        self.settings = SimpleNamespace(aoi_id=aoi_id)
+        self.initialized = False
+        self.aoi_definitions: list[dict] = []
+        self.uploaded: list[str] = []
+        self.observations: list[dict] = []
+        self.tiles: list[dict] = []
+        self.features: list[dict] = []
+        self.forecasts: list[dict] = []
+        self.runs: list[dict] = []
+
+    def initialize(self):
+        self.initialized = True
+
+    def ensure_aoi_definition(self, definition):
+        self.aoi_definitions.append(definition)
+        return self._artifact(self.aoi_key(relative_path="definition.json"))
+
+    def load_observations(self):
+        return []
+
+    def download_json(self, *, key):
+        return None
+
+    def upload_json_if_changed(self, value, *, key):
+        self.uploaded.append(key)
+        return self._artifact(key)
+
+    def upload_json_file(self, path, *, key):
+        self.uploaded.append(key)
+        return self._artifact(key)
+
+    def upload_file_if_changed(self, path, *, key, content_type):
+        self.uploaded.append(key)
+        return self._artifact(key)
+
+    def upload_file(self, path, *, key, content_type):
+        self.uploaded.append(key)
+        return self._artifact(key)
+
+    def upsert_observations(self, rows, *, run_id):
+        self.observations.extend(rows)
+
+    def upsert_tiles(self, rows, *, run_id):
+        self.tiles.extend(rows)
+
+    def upsert_features(self, rows, *, run_id):
+        self.features.extend(rows)
+
+    def upsert_forecasts(self, rows, *, run_id):
+        self.forecasts.extend(rows)
+
+    def record_run(self, payload, *, run_id):
+        self.runs.append({**payload, "run_id": run_id})
+
+    def aoi_key(self, *, relative_path):
+        return f"terra-uc1/{self.settings.aoi_id}/aoi/{relative_path}"
+
+    def data_key(self, *, relative_path):
+        return f"terra-uc1/{self.settings.aoi_id}/{relative_path}"
+
+    def run_key(self, *, run_id, relative_path):
+        return f"terra-uc1/{self.settings.aoi_id}/runs/{run_id}/{relative_path}"
+
+    @staticmethod
+    def _artifact(key):
+        return {"bucket": "test-bucket", "key": key, "sha256": "test"}
 
 
 def tile_records():
@@ -244,6 +318,39 @@ def test_scheduled_maps_backfill_flag_to_collection_provider(tmp_path):
     )
     pipeline.execute()
     assert provider.requests[0].mode == "backfill"
+
+
+def test_scheduled_pipeline_persists_aoi_observations_tiles_and_run_snapshot(tmp_path, monkeypatch):
+    storage = FakeRemoteStorage()
+    monkeypatch.setattr("forecaster.scheduled_pipeline.MongoMinioStore", lambda _settings: storage)
+    pipeline = ScheduledIncrementalPipeline(
+        ScheduledPipelineConfig(
+            aoi_bbox=[22.0, 38.0, 22.01, 38.01],
+            run_name="persistent",
+            output_root=tmp_path,
+            history_start="2026-01-01",
+            target_date="2026-01-06",
+            run_inference=False,
+        ),
+        collection_provider=FakeCollectionProvider(["2026-01-01", "2026-01-06"]),
+    )
+
+    result = pipeline.execute()
+
+    assert result.status == "success"
+    assert storage.initialized is True
+    assert storage.aoi_definitions[0]["aoi_id"] == "test-aoi"
+    assert [(row["tile_id"], row["observation_date"]) for row in storage.observations] == [
+        ("tile_0", "2026-01-01"),
+        ("tile_0", "2026-01-06"),
+    ]
+    assert [row["name"] for row in storage.tiles] == ["tile_0"]
+    assert storage.runs[0]["run_name"] == "persistent"
+    assert storage.runs[0]["status"] == "success"
+    assert "terra-uc1/test-aoi/aoi/tiles/river_tiles.geojson" in storage.uploaded
+    assert "terra-uc1/test-aoi/observations/2026-01-01.json" in storage.uploaded
+    assert "terra-uc1/test-aoi/observations/2026-01-06.json" in storage.uploaded
+    assert any(key.endswith("/scheduled_run_result.json") for key in storage.uploaded)
 
 
 def test_scheduled_dry_run_does_not_write_history_or_state(tmp_path):
