@@ -11,3 +11,5 @@ matplotlib==3.10.1
 Pillow==12.2.0
 requests==2.32.3
 python-dotenv==1.0.1
+boto3==1.35.99
+pymongo==4.10.1

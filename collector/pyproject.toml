@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["jsonschema>=4.23", "pytest==8.3.4"]
+test = ["jsonschema==4.23.0", "pytest==8.3.4"]
 
 [project.scripts]
 terra-collect = "data_collection.cli:main"

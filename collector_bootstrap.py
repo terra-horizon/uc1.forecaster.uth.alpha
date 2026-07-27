@@ -4,14 +4,14 @@ import sys
 from pathlib import Path
 
 
-DATA_COLLECTION_ROOT = Path(__file__).resolve().parent / "data-collection"
+COLLECTOR_ROOT = Path(__file__).resolve().parent / "collector"
 
 
 def ensure_data_collection_importable() -> Path:
-    root = str(DATA_COLLECTION_ROOT)
+    root = str(COLLECTOR_ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
-    return DATA_COLLECTION_ROOT
+    return COLLECTOR_ROOT
 
 
 ensure_data_collection_importable()

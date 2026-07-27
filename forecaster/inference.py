@@ -40,10 +40,10 @@ from forecaster.models.multi_feature_model_v15 import HorizonVelocityScale, buil
 from forecaster.water_tile_selector import WaterTileSelector, print_selection_summary
 
 
-REPO_ROOT = Path(__file__).resolve().parent
-FORECASTER_DIR = REPO_ROOT / "forecaster"
+FORECASTER_DIR = Path(__file__).resolve().parent
+REPO_ROOT = FORECASTER_DIR.parent
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "data" / "inference_runs"
-DEFAULT_MODEL_ROOT = REPO_ROOT / "forecaster" / "models" / "default_model"
+DEFAULT_MODEL_ROOT = FORECASTER_DIR / "models" / "default_model"
 
 DEFAULT_IMAGE_KEYS = ("true_color", "chla", "cdom", "turb", "doc", "cya", "surface_temperature")
 DEFAULT_FEATURE_CSV_NAME = "5D_mean_metrics_interpolated_time_based.csv"

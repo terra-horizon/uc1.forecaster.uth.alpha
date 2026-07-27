@@ -1,0 +1,26 @@
+services:
+  forecaster:
+    build:
+      context: .
+    image: ${UC1_IMAGE_NAME:-uc1-forecaster:local}
+    # Deliberately whitelist runtime variables. The infrastructure .env also
+    # contains root credentials and must never be passed wholesale to the app.
+    environment:
+      CDSE_CLIENT_ID: ${CDSE_CLIENT_ID:-}
+      CDSE_CLIENT_SECRET: ${CDSE_CLIENT_SECRET:-}
+      CDSE_BACKUP_CLIENT_ID: ${CDSE_BACKUP_CLIENT_ID:-}
+      CDSE_BACKUP_CLIENT_SECRET: ${CDSE_BACKUP_CLIENT_SECRET:-}
+      CDSE_BACKUP_2_CLIENT_ID: ${CDSE_BACKUP_2_CLIENT_ID:-}
+      CDSE_BACKUP_2_CLIENT_SECRET: ${CDSE_BACKUP_2_CLIENT_SECRET:-}
+      TERRA_STORAGE_ENABLED: ${TERRA_STORAGE_ENABLED:-false}
+      TERRA_AOI_ID: ${TERRA_AOI_ID:-uc1-dev}
+      MONGO_URI: ${MONGO_URI:-}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-}
+      MINIO_VERIFY_TLS: ${MINIO_VERIFY_TLS:-true}
+      MINIO_CA_BUNDLE: ${MINIO_CA_BUNDLE:-}
+    volumes:
+      - ${UC1_OUTPUT_DIR:-./data/inference_runs}:/app/data/inference_runs
+    init: true

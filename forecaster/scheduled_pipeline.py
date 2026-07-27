@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -9,8 +10,8 @@ from typing import Any
 
 import pandas as pd
 
-from data_collection_bootstrap import ensure_data_collection_importable
-from forecast import (
+from collector_bootstrap import ensure_data_collection_importable
+from forecaster.inference import (
     AOIInferenceConfig,
     AOIInferencePipeline,
     DEFAULT_FEATURE_CSV_NAME,
@@ -19,7 +20,9 @@ from forecast import (
 )
 from forecaster.collection_provider import CollectionProvider, CollectionRequest, LocalCollectionProvider
 from forecaster.core.global_preprocessor import WATER_TARGET_COLS
+from forecaster.aoi import build_aoi_definition
 from forecaster.stac_exporter import StacCatalogExporter
+from forecaster.storage import MongoMinioStore, StorageConfigurationError, StorageConnectionError, StorageSettings
 from forecaster.water_tile_selector import WaterTileSelector
 
 ensure_data_collection_importable()
@@ -141,6 +144,16 @@ class ScheduledIncrementalPipeline:
     def __init__(self, config: ScheduledPipelineConfig, *, collection_provider: CollectionProvider | None = None):
         self.config = config
         self.run_dir = Path(config.output_root) / self._slugify(config.run_name)
+        self.execution_id = f"run-{utc_now().replace(':', '').replace('+', '').replace('Z', 'Z')}"
+        self.storage = MongoMinioStore(StorageSettings.from_env())
+        self.aoi_definition = build_aoi_definition(
+            aoi_id=self.storage.settings.aoi_id,
+            bbox=list(config.aoi_bbox),
+            projected_crs=config.projected_crs,
+            spacing_m=config.spacing_m,
+            box_size_m=config.box_size_m,
+            min_river_length_m=config.min_river_length_m,
+        )
         self.state = ProcessingState(self.run_dir / "processing" / "state.json", self.run_dir / "state.json")
         self.forecast_store = JsonCsvStore(
             self.run_dir / "forecasts" / "global_forecasts.json",
@@ -151,6 +164,10 @@ class ScheduledIncrementalPipeline:
 
     def execute(self) -> ScheduledPipelineResult:
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.storage.initialize()
+        self.storage.ensure_aoi_definition(self.aoi_definition)
+        self._hydrate_remote_history()
+        self._hydrate_remote_collection_state()
         state = self.state.load()
         collection_result = self.collection_provider.collect(self._collection_request())
         warnings = list(collection_result.warnings)
@@ -211,6 +228,7 @@ class ScheduledIncrementalPipeline:
         (self.run_dir / "scheduled_run_result.json").write_text(
             json.dumps(asdict(result), indent=2, allow_nan=False), encoding="utf-8"
         )
+        self._persist_remote(result, tile_records=tile_records, history_records=history_records)
         self._log(run_summary)
         return result
 
@@ -403,6 +421,20 @@ class ScheduledIncrementalPipeline:
                     row[f"{column}_gpr_std"] = 0.0
                 rows.append(row)
             pd.DataFrame(rows).to_csv(csv_path, index=False)
+            feature_rows = [
+                {
+                    "tile_id": tile_id,
+                    "feature_date": row["date"],
+                    "preprocessing_schema_version": "1.0.0",
+                    **row,
+                }
+                for row in rows
+            ]
+            artifact = self.storage.upload_json_if_changed(
+                feature_rows,
+                key=self.storage.data_key(relative_path=f"preprocessed/features/{tile_id}.json"),
+            )
+            self.storage.upsert_features([{**row, "artifact": artifact} for row in feature_rows], run_id=self.execution_id)
             feature_csvs[tile_id] = str(csv_path)
         return feature_csvs
 
@@ -414,6 +446,122 @@ class ScheduledIncrementalPipeline:
             forecast_rows=[],
             anchor_date=None,
             horizon_days=int(self.config.model_profile.horizon) * int(self.config.model_profile.cadence_days),
+        )
+
+    def _hydrate_remote_history(self) -> None:
+        """Seed local staging history from MongoDB when a container starts clean."""
+        if not self.storage.enabled:
+            return
+        history_path = self.run_dir / "history" / "global_history.json"
+        if history_path.exists():
+            return
+        records = self.storage.load_observations()
+        if not records:
+            return
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(records, indent=2, allow_nan=False), encoding="utf-8")
+        self._log(f"Hydrated {len(records)} observation record(s) from MongoDB.")
+
+    def _hydrate_remote_collection_state(self) -> None:
+        """Restore the AOI checkpoint before the collector calculates its next window."""
+        state_path = self.run_dir / "collection" / "state.json"
+        if state_path.exists() or not self.storage.enabled:
+            return
+        state = self.storage.download_json(key=self.storage.aoi_key(relative_path="collection_state.json"))
+        if state is None:
+            return
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, indent=2, allow_nan=False), encoding="utf-8")
+        self._log("Hydrated collection checkpoint from AOI storage.")
+
+    def _persist_remote(self, result: ScheduledPipelineResult, *, tile_records: list[dict[str, Any]], history_records: list[dict[str, Any]]) -> None:
+        if not self.storage.enabled:
+            return
+        artifacts: list[dict[str, Any]] = []
+
+        def add_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+            if artifact:
+                artifacts.append(artifact)
+            return artifact
+
+        # Stable AOI assets are content-addressed and reused between runs.
+        stable_files = {
+            "tiles/river_tiles.geojson": ("tiles/river_tiles.geojson", "application/geo+json"),
+            "tiles/tile_records.json": ("tiles/tile_records.json", "application/json"),
+            "tiles/tile_state.json": ("tiles/tile_state.json", "application/json"),
+            "stac_catalog/geometries.json": ("stac/geometries.json", "application/json"),
+            "stac_catalog/collection.json": ("stac/collection.json", "application/json"),
+            "collection/state.json": ("collection_state.json", "application/json"),
+        }
+        stable_artifacts: dict[str, dict[str, Any]] = {}
+        for local_relative, (remote_relative, content_type) in stable_files.items():
+            path = self.run_dir / local_relative
+            if not path.exists():
+                continue
+            artifact = self.storage.upload_file_if_changed(
+                path,
+                key=self.storage.aoi_key(relative_path=remote_relative),
+                content_type=content_type,
+            )
+            stable_artifacts[local_relative] = add_artifact(artifact)
+
+        # Raw observations are canonical AOI data, keyed by observation date.
+        observation_artifacts: dict[str, dict[str, Any]] = {}
+        by_date: dict[str, list[dict[str, Any]]] = {}
+        for record in history_records:
+            by_date.setdefault(str(record["observation_date"]), []).append(record)
+        for observation_date, records in sorted(by_date.items()):
+            artifact = self.storage.upload_json_if_changed(
+                records,
+                key=self.storage.data_key(relative_path=f"observations/{observation_date}.json"),
+            )
+            observation_artifacts[observation_date] = add_artifact(artifact)
+        self.storage.upsert_observations(
+            [{**record, "artifact": observation_artifacts.get(str(record["observation_date"]), {})} for record in history_records],
+            run_id=self.execution_id,
+        )
+        self.storage.upsert_tiles(
+            [{**record, "artifact": stable_artifacts.get("tiles/tile_records.json", {})} for record in tile_records],
+            run_id=self.execution_id,
+        )
+
+        # Only operational outputs belong to the immutable run snapshot.
+        stable_paths = set(stable_files) | {"history/global_history.json"}
+        for path in sorted(self.run_dir.rglob("*.json")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(self.run_dir).as_posix()
+            if relative.startswith("cdse_stac_cache/") or relative in stable_paths:
+                continue
+            if relative.startswith("forecasts/"):
+                continue
+            add_artifact(self.storage.upload_json_file(path, key=self.storage.run_key(run_id=self.execution_id, relative_path=relative)))
+        for path in sorted(self.run_dir.rglob("*.jsonl")):
+            if path.is_file():
+                relative = path.relative_to(self.run_dir).as_posix()
+                add_artifact(self.storage.upload_file(path, key=self.storage.run_key(run_id=self.execution_id, relative_path=relative), content_type="application/x-ndjson"))
+
+        forecast_path = self.run_dir / "forecasts" / "global_forecasts.json"
+        if forecast_path.exists():
+            forecast_records = self._load_json(str(forecast_path), [])
+            forecast_run_ids = sorted({str(record["forecast_run_id"]) for record in forecast_records})
+            forecast_artifact = {}
+            for forecast_run_id in forecast_run_ids:
+                rows = [record for record in forecast_records if str(record["forecast_run_id"]) == forecast_run_id]
+                forecast_artifact = add_artifact(self.storage.upload_json_if_changed(rows, key=self.storage.data_key(relative_path=f"forecasts/{forecast_run_id}.json")))
+                self.storage.upsert_forecasts([{**record, "artifact": forecast_artifact} for record in rows], run_id=self.execution_id)
+        self.storage.record_run(
+            {
+                "run_name": self.config.run_name,
+                "status": result.status,
+                "run_summary": result.run_summary,
+                "forecast_status": result.forecast_status,
+                "forecast_anchor": result.forecast_anchor,
+                "new_data_available": result.new_data_available,
+                "warnings": result.warnings,
+                "artifacts": artifacts,
+            },
+            run_id=self.execution_id,
         )
 
     @staticmethod
@@ -594,19 +742,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    result = ScheduledIncrementalPipeline(ScheduledPipelineConfig(
-        aoi_bbox=parse_bbox(args.bbox),
-        run_name=args.run_name,
-        output_root=Path(args.output_root),
-        history_start=args.history_start,
-        target_date=args.target_date,
-        dry_run=args.dry_run,
-        max_days_per_run=args.max_days_per_run,
-        max_tiles_per_run=args.max_tiles_per_run,
-        discovery_chunk_days=args.discovery_chunk_days,
-        backfill_all=args.backfill_all,
-        stac_base_url=args.stac_base_url,
-        run_inference=not args.skip_inference,
-    )).execute()
+    try:
+        result = ScheduledIncrementalPipeline(ScheduledPipelineConfig(
+            aoi_bbox=parse_bbox(args.bbox),
+            run_name=args.run_name,
+            output_root=Path(args.output_root),
+            history_start=args.history_start,
+            target_date=args.target_date,
+            dry_run=args.dry_run,
+            max_days_per_run=args.max_days_per_run,
+            max_tiles_per_run=args.max_tiles_per_run,
+            discovery_chunk_days=args.discovery_chunk_days,
+            backfill_all=args.backfill_all,
+            stac_base_url=args.stac_base_url,
+            run_inference=not args.skip_inference,
+        )).execute()
+    except (StorageConfigurationError, StorageConnectionError) as exc:
+        print(f"Storage setup failed: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(asdict(result), indent=2, allow_nan=False))
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

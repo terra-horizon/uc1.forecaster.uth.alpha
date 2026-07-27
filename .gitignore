@@ -1,12 +1,5 @@
 .DS_Store
 .env
-.env.runtime
-.env.server
-.env.runtime.example
-.env.server.example
-docker-compose.dev.yml
-docker-compose.server.yml
-certs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
