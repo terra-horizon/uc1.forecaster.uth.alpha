@@ -1,6 +1,6 @@
 # TERRA UC1 Data Collection
 
-This folder is the standalone collector module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state. It does not decide whether a tile contains water; that check belongs to the forecasting pipeline.
+This folder is the standalone collector module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state.
 
 For normal deployment, run the repository-level
 `forecaster.scheduled_pipeline`; it invokes this module and persists results to
@@ -26,7 +26,14 @@ files or logs.
 
 ## Run
 
-The first automatic run performs a resumable historical backfill. Later runs discover and collect only incomplete or newly available tile-date units.
+The command shape is:
+
+```bash
+python -m data_collection run --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT --run-name NAME [options]
+```
+
+The first automatic run performs a resumable historical backfill. Later runs
+discover and collect only incomplete or newly available tile-date units.
 
 ```bash
 python -m data_collection run \
@@ -68,17 +75,91 @@ Validate a completed or partial run:
 python -m data_collection validate --run-dir outputs/sperchios
 ```
 
+## Run inputs
+
+All inputs accepted by `python -m data_collection run` are listed below. Dates
+use `YYYY-MM-DD`; the bounding box uses EPSG:4326 coordinate order
+`min_lon min_lat max_lon max_lat`.
+
+| Input | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | Yes | — | Area of interest used for STAC discovery and river-tile extraction. Four decimal-degree coordinates in west, south, east, north order. |
+| `--run-name NAME` | Yes | — | Stable local run identifier. It is normalized into the output directory name; reuse the same name for incremental updates of the same AOI and tile configuration. |
+| `--output-root PATH` | No | `outputs` | Parent directory for the collector run directory. The collector writes to `PATH/<normalized-run-name>/`. |
+| `--history-start DATE` | No | `2016-01-01` | First date considered during a historical backfill. |
+| `--target-date DATE` | No | Current local date | Last date considered in this invocation. Use it to make a bounded historical run reproducible. |
+| `--mode {auto,backfill,incremental}` | No | `auto` | Controls discovery windows and state reuse; see [Modes](#modes). |
+| `--dry-run` | No | Off | Discovers available and missing dates without writing collector files or requesting statistics. |
+| `--max-days-per-run N` | No | No limit | Limits the number of missing observation dates collected in one invocation. `N` must be positive. |
+| `--max-tiles-per-run N` | No | No limit | Limits the number of river tiles processed in one invocation. `N` must be positive. |
+| `--discovery-chunk-days N` | No | `31` | Number of calendar days per CDSE STAC discovery request. `N` must be positive. This changes request chunking, not the returned record schema. |
+| `--spacing-m N` | No | `400` | Distance in metres between generated river-tile centres. Changing it changes the tile set. |
+| `--box-size-m N` | No | `400` | Width and height in metres of each generated square tile. Changing it changes the tile set. |
+| `--min-river-length-m N` | No | `10000.0` | Minimum river-geometry length in metres required to generate tiles. |
+| `--projected-crs CRS` | No | `EPSG:32634` | Projected CRS used for metre-based river length and tile calculations. Select a CRS appropriate for the AOI. |
+| `--max-cloud-coverage N` | No | `30` | Maximum Sentinel-2 cloud-cover percentage accepted by CDSE discovery and statistics requests. |
+
+Changing the AOI, tile parameters, or projected CRS while reusing a run name
+invalidates the cached tile set. Use a new run name or output root when keeping
+the previous local staging artifacts is important.
+
+## Validation input
+
+Validate an existing run without contacting CDSE:
+
+| Command | Required input | Result |
+| --- | --- | --- |
+| `python -m data_collection validate --run-dir PATH` | `--run-dir`: existing collector run directory | Validates the required JSON and GeoJSON artifacts against the bundled schemas. It exits `0` when valid and `1` when invalid. |
+
+## Credential and environment inputs
+
+The collector reads credentials at runtime. They are never written to output
+files or logs.
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `CDSE_CLIENT_ID` | Yes | Primary Copernicus Data Space Ecosystem client ID. |
+| `CDSE_CLIENT_SECRET` | Yes | Primary Copernicus Data Space Ecosystem client secret. |
+| `CDSE_BACKUP_CLIENT_ID`, `CDSE_BACKUP_CLIENT_SECRET` | No | First fallback credential pair. `CDSE_FALLBACK_CLIENT_ID` and `CDSE_FALLBACK_CLIENT_SECRET` are accepted aliases. |
+| `CDSE_BACKUP_2_CLIENT_ID` … `CDSE_BACKUP_9_CLIENT_ID` and matching secrets | No | Additional fallback credential pairs. A pair is used only when both values are set. |
+| `DATA_COLLECTION_ENV_FILE` | No | Explicit path to an environment file. If unset, the collector searches for `.env` from the current directory, collector directory, then repository root. |
+
 ## Modes
 
-- `auto`: backfill when collection state is absent, then incrementally update.
-- `backfill`: explicitly discover the complete interval from `--history-start`.
-- `incremental`: discover dates after the last checked date and retry known incomplete units.
+- `auto`: when no completed state exists, discovers from `--history-start` to
+  `--target-date`; after backfill completion, starts after the last checked
+  date and retries incomplete known units.
+- `backfill`: explicitly discovers the complete interval from
+  `--history-start` to `--target-date`, regardless of existing completion
+  state.
+- `incremental`: starts after the last checked date (or `--history-start` when
+  no checkpoint exists) and retries known incomplete units.
 
 Collection progress is tracked per `tile_id + observation_date`. A date is complete only after every expected tile has a terminal `collected` or `unavailable` record. Network and authentication failures remain retryable and are reported separately.
 
 ## Outputs
 
-Each run writes collection state and result metadata, global and per-tile JSON/CSV history, river-tile GeoJSON, STAC discovery caches, and JSONL logs. Collector records use `water_check_status: not_performed` and `water_status: unknown`; the forecaster enriches copies of those records before inference. See [DATA_CONTRACT.md](DATA_CONTRACT.md) and `data_collection/schemas/` for the exchange contract.
+For `--output-root outputs --run-name sperchios`, the collector writes under
+`outputs/sperchios/`:
+
+| Path | Purpose |
+| --- | --- |
+| `collection/collection_run_result.json` | Machine-readable result for the invocation: status, discovered dates, collected dates, retryable failures, warnings, and artifact paths. |
+| `collection/state.json` | Incremental checkpoint: known STAC dates, completion status, expected tiles, retryable failures, and last checked date. |
+| `history/global_history.json` | Canonical local collector history, one raw record per tile and observation date. |
+| `history/global_history.csv` | CSV compatibility view of the same history. |
+| `history/tiles/<tile_id>/history.json` and `.csv` | Per-tile views of the history. |
+| `tiles/river_tiles.geojson` | Generated river-tile geometry. |
+| `tiles/tile_records.json` | Tile names, bounding boxes, geometry metadata, and size. |
+| `tiles/tile_state.json` | Tile-configuration hash used to decide whether cached tiles remain valid. |
+| `cdse_stac_cache/<start>_<end>.json` | Cached CDSE discovery responses for each discovery window. |
+| `logs/collector.jsonl` | Structured collector log events. |
+| `collector_work/` | Per-request temporary statistical inputs and CSV outputs used while records are assembled. |
+
+Collector records use `water_check_status: not_performed` and
+`water_status: unknown`; the forecaster enriches copies before inference. See
+[DATA_CONTRACT.md](DATA_CONTRACT.md) for record schemas, MongoDB/MinIO mapping,
+relationships, and durable-storage semantics.
 
 The Python integration boundary is:
 
