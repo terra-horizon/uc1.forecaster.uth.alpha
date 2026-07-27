@@ -1,5 +1,12 @@
 .DS_Store
 .env
+.env.runtime
+.env.server
+.env.runtime.example
+.env.server.example
+docker-compose.dev.yml
+docker-compose.server.yml
+certs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -28,4 +35,6 @@ docs/docs/alpha-uc1-data-schemas.md
 # Model evaluation plots are not required for alpha inference runtime.
 forecaster/models/default_model/evaluations/
 
-
+# Examples and Tests
+terra-minio-example.py
+test_mongo_db.py
