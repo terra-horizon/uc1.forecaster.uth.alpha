@@ -524,35 +524,57 @@ class WaterTileSelector:
             },
         }
 
-        for attempt in range(1, retries + 1):
-            response = requests.post(
-                STATS_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {self._get_access_token()}",
-                },
-                json=payload,
-                timeout=120,
-            )
+        exhausted_credential_retries = 0
+        while True:
+            try:
+                response = requests.post(
+                    STATS_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {self._get_access_token()}",
+                    },
+                    json=payload,
+                    timeout=120,
+                )
+            except requests.RequestException as exc:
+                exhausted_credential_retries += 1
+                if exhausted_credential_retries >= retries:
+                    raise RuntimeError(
+                        f"CDSE water statistics request failed for {tile.name} "
+                        f"after {retries} network attempt(s)."
+                    ) from exc
+                print(
+                    f"[WaterTileSelector] Network request failed for {tile.name}; "
+                    f"retrying {exhausted_credential_retries + 1}/{retries}."
+                )
+                continue
+
             if response.status_code == 401:
                 self._access_tokens.pop(self._credential_index, None)
+                exhausted_credential_retries += 1
+                if exhausted_credential_retries >= retries:
+                    response.raise_for_status()
                 continue
-            if response.status_code in (429, 403) and self._switch_to_next_credentials(response.status_code, tile.name):
-                continue
-            if response.status_code in (429, 403) and attempt < retries:
-                wait_seconds = 180
-                print(
-                    f"[WaterTileSelector] Rate limited ({response.status_code}) for {tile.name}; "
-                    f"waiting {wait_seconds}s before retry {attempt + 1}/{retries}."
-                )
-                time.sleep(wait_seconds)
-                continue
+
+            if response.status_code in (429, 403):
+                if self._switch_to_next_credentials(response.status_code, tile.name):
+                    # Switching credentials does not consume a retry. Every
+                    # configured credential must receive a statistics request.
+                    continue
+                exhausted_credential_retries += 1
+                if exhausted_credential_retries < retries:
+                    wait_seconds = 180
+                    print(
+                        f"[WaterTileSelector] Request rejected ({response.status_code}) for "
+                        f"{tile.name} by all configured credentials; waiting {wait_seconds}s "
+                        f"before retry {exhausted_credential_retries + 1}/{retries}."
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
             response.raise_for_status()
             return self._parse_stats_response(response.json())
-
-        response.raise_for_status()
-        return []
 
     @staticmethod
     def _parse_stats_response(payload: dict) -> list[dict]:

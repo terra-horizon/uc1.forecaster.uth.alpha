@@ -46,8 +46,8 @@ These artifacts are treated as runtime dependencies for Alpha 1 inference.
 
 ## Persistence and external services
 
-The pipeline requires CDSE credentials for Sentinel data access. When storage
-is enabled, it also requires existing MongoDB and MinIO services. All endpoints
+The pipeline requires CDSE credentials for Sentinel data access. The scheduled
+pipeline also requires existing MongoDB and MinIO services. All endpoints
 and application credentials come from runtime environment variables; the image
 does not create databases, buckets, users, or SSH tunnels.
 

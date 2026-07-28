@@ -25,8 +25,6 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = StorageSettings.from_env()
-    if not settings.enabled:
-        raise SystemExit("Set TERRA_STORAGE_ENABLED=true before cleaning storage.")
     if args.aoi != settings.aoi_id:
         raise SystemExit(f"Refusing: --aoi={args.aoi!r} does not match TERRA_AOI_ID.")
 

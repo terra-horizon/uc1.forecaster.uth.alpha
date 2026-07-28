@@ -33,7 +33,7 @@ CDSE_CLIENT_SECRET=...
 
 ## Storage endpoints
 
-When `TERRA_STORAGE_ENABLED=true`, configure existing MongoDB and MinIO
+The scheduled pipeline requires existing MongoDB and MinIO
 services in the same root `.env` file:
 
 ```text

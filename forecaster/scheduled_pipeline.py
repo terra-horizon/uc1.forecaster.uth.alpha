@@ -141,11 +141,17 @@ class ProcessingState:
 
 
 class ScheduledIncrementalPipeline:
-    def __init__(self, config: ScheduledPipelineConfig, *, collection_provider: CollectionProvider | None = None):
+    def __init__(
+        self,
+        config: ScheduledPipelineConfig,
+        *,
+        collection_provider: CollectionProvider | None = None,
+        storage: MongoMinioStore | None = None,
+    ):
         self.config = config
         self.run_dir = Path(config.output_root) / self._slugify(config.run_name)
         self.execution_id = f"run-{utc_now().replace(':', '').replace('+', '').replace('Z', 'Z')}"
-        self.storage = MongoMinioStore(StorageSettings.from_env())
+        self.storage = storage or MongoMinioStore(StorageSettings.from_env())
         self.aoi_definition = build_aoi_definition(
             aoi_id=self.storage.settings.aoi_id,
             bbox=list(config.aoi_bbox),
@@ -450,8 +456,6 @@ class ScheduledIncrementalPipeline:
 
     def _hydrate_remote_history(self) -> None:
         """Seed local staging history from MongoDB when a container starts clean."""
-        if not self.storage.enabled:
-            return
         history_path = self.run_dir / "history" / "global_history.json"
         if history_path.exists():
             return
@@ -465,7 +469,7 @@ class ScheduledIncrementalPipeline:
     def _hydrate_remote_collection_state(self) -> None:
         """Restore the AOI checkpoint before the collector calculates its next window."""
         state_path = self.run_dir / "collection" / "state.json"
-        if state_path.exists() or not self.storage.enabled:
+        if state_path.exists():
             return
         state = self.storage.download_json(key=self.storage.aoi_key(relative_path="collection_state.json"))
         if state is None:
@@ -475,8 +479,6 @@ class ScheduledIncrementalPipeline:
         self._log("Hydrated collection checkpoint from AOI storage.")
 
     def _persist_remote(self, result: ScheduledPipelineResult, *, tile_records: list[dict[str, Any]], history_records: list[dict[str, Any]]) -> None:
-        if not self.storage.enabled:
-            return
         artifacts: list[dict[str, Any]] = []
 
         def add_artifact(artifact: dict[str, Any]) -> dict[str, Any]:

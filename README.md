@@ -91,7 +91,7 @@ The operational flow is:
 6. **Inference**: The pre-processed 5-day time series is passed to the Global BiLSTM model to forecast the future state of the water quality indicators.
 7. **Export**: Predictions are saved as `.json` and `.csv` files, alongside visual plots showing history vs. forecast.
 
-The scheduled pipeline uses the tracked [standalone collector module](collector/README.md) through a local provider contract. The collector gathers every available tile/date record. The forecaster owns historical water screening and selects tiles with enough usable water observations before inference. Collection state and history remain independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later.
+The scheduled pipeline uses the tracked [standalone collector module](collector/README.md) through a local provider contract. The collector gathers every available tile/date record. The forecaster owns historical water screening and selects tiles with enough usable water observations before inference. Collection state and history remain independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later. Every scheduled run requires MongoDB and MinIO and persists its results to both.
 
 ### Direct one-off inference
 
@@ -127,6 +127,7 @@ CDSE_BACKUP_CLIENT_ID
 CDSE_BACKUP_CLIENT_SECRET
 CDSE_BACKUP_2_CLIENT_ID
 CDSE_BACKUP_2_CLIENT_SECRET
+# Additional complete pairs may be supplied through CDSE_BACKUP_9_*
 ```
 
 For local development, place credentials in a repository-root `.env` file. The file is ignored by Git and excluded from the Docker build context.
@@ -166,7 +167,6 @@ on another Docker network, or reached through a host-side SSH tunnel.
 
 | Variable | Purpose |
 | --- | --- |
-| `TERRA_STORAGE_ENABLED` | Set to `true` to require remote MongoDB and MinIO persistence. |
 | `MONGO_URI` | Complete MongoDB URI, including the database and authentication source. |
 | `MINIO_ENDPOINT` | MinIO S3 API URL, for example `http://minio:9000`. |
 | `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | MinIO application credentials. |
@@ -201,8 +201,8 @@ credential-safe error naming the failed target and the relevant configuration
 variables. Credentials are never included in those messages.
 
 The image runs as a non-root user and uses `forecaster.scheduled_pipeline` as
-its entrypoint. When storage is enabled, it writes queryable records to MongoDB
-and JSON/GeoJSON/STAC artifacts to MinIO.
+its entrypoint. It writes queryable records to MongoDB and JSON/GeoJSON/STAC
+artifacts to MinIO.
 
 ### Run direct inference in Docker
 

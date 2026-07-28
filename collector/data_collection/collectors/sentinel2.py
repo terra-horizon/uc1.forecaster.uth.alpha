@@ -203,14 +203,23 @@ class StatisticalCollection:
         }
 
         response = None
-        for attempt in range(1, retries + 1):
+        exhausted_credential_retries = 0
+        while True:
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.access_token}",
             }
 
-            response = requests.post(self.api_url, headers=headers, json=payload)
+            try:
+                response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
+            except requests.exceptions.RequestException as exc:
+                exhausted_credential_retries += 1
+                if exhausted_credential_retries >= retries:
+                    print(f"[Statistics] Statistics request failed after {retries} network attempt(s): {exc}")
+                    return None
+                print(f"[Statistics] Statistics request failed ({exc}); retrying {exhausted_credential_retries + 1}/{retries}.")
+                continue
 
             if response.status_code == 200:
                 print(f"API Response: {response.status_code}")
@@ -223,11 +232,15 @@ class StatisticalCollection:
 
             if response.status_code in (403, 429):
                 if self._switch_to_next_credentials(response.status_code):
+                    # Each configured credential must receive a request. A
+                    # credential switch is not a retry of the same request.
                     continue
-                if attempt < retries:
+                exhausted_credential_retries += 1
+                if exhausted_credential_retries < retries:
                     _sleep_with_countdown(
                         RETRY_DELAY_SECONDS,
-                        f"[Statistics] Rate limited ({response.status_code}). Waiting 3 minutes before retry {attempt + 1}/{retries}...",
+                        f"[Statistics] Request rejected ({response.status_code}) by all configured credentials. "
+                        f"Waiting 3 minutes before retry {exhausted_credential_retries + 1}/{retries}...",
                     )
                     continue
                 print(f"[Statistics] Rate limit persisted after {retries} attempts.")
@@ -235,8 +248,6 @@ class StatisticalCollection:
 
             print(f"API Response: {response.status_code}")
             return response
-
-        return response
 
     def save_data(self):
         """Retrieve and save statistical data for defined time slots"""
@@ -247,7 +258,7 @@ class StatisticalCollection:
         for slot in self.slots:
             image_count += 1
             response = self.get_request(self.evalscripts["all_pixels"], slot, self.bbox)
-            if not response:
+            if response is None:
                 print("[Statistics] No response received; skipping this slot.")
                 self.failures.append({"interval": list(slot), "status_code": None, "reason": "no_response"})
                 continue

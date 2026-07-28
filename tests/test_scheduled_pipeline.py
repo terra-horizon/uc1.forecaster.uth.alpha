@@ -109,7 +109,6 @@ class FakeRemoteStorage:
     """In-memory boundary double for scheduled MongoDB/MinIO persistence."""
 
     def __init__(self, *, aoi_id: str = "test-aoi"):
-        self.enabled = True
         self.settings = SimpleNamespace(aoi_id=aoi_id)
         self.initialized = False
         self.aoi_definitions: list[dict] = []
@@ -283,6 +282,7 @@ def test_scheduled_first_run_uses_collection_provider_and_exports_stac(tmp_path)
             run_inference=False,
         ),
         collection_provider=provider,
+        storage=FakeRemoteStorage(),
     )
 
     result = pipeline.execute()
@@ -315,14 +315,14 @@ def test_scheduled_maps_backfill_flag_to_collection_provider(tmp_path):
             backfill_all=True,
         ),
         collection_provider=provider,
+        storage=FakeRemoteStorage(),
     )
     pipeline.execute()
     assert provider.requests[0].mode == "backfill"
 
 
-def test_scheduled_pipeline_persists_aoi_observations_tiles_and_run_snapshot(tmp_path, monkeypatch):
+def test_scheduled_pipeline_persists_aoi_observations_tiles_and_run_snapshot(tmp_path):
     storage = FakeRemoteStorage()
-    monkeypatch.setattr("forecaster.scheduled_pipeline.MongoMinioStore", lambda _settings: storage)
     pipeline = ScheduledIncrementalPipeline(
         ScheduledPipelineConfig(
             aoi_bbox=[22.0, 38.0, 22.01, 38.01],
@@ -333,6 +333,7 @@ def test_scheduled_pipeline_persists_aoi_observations_tiles_and_run_snapshot(tmp
             run_inference=False,
         ),
         collection_provider=FakeCollectionProvider(["2026-01-01", "2026-01-06"]),
+        storage=storage,
     )
 
     result = pipeline.execute()
@@ -365,6 +366,7 @@ def test_scheduled_dry_run_does_not_write_history_or_state(tmp_path):
             run_inference=False,
         ),
         collection_provider=FakeCollectionProvider(["2026-01-01"]),
+        storage=FakeRemoteStorage(),
     )
 
     result = pipeline.execute()
@@ -474,7 +476,7 @@ def test_forecaster_water_history_queries_only_unchecked_dates(tmp_path, monkeyp
         run_name="water_cache",
         output_root=tmp_path,
         run_inference=False,
-    ))
+    ), storage=FakeRemoteStorage())
     geojson = tmp_path / "tiles.geojson"
     geojson.write_text(json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8")
     history = [

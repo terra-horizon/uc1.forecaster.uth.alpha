@@ -15,8 +15,6 @@ COLLECTIONS = ("observations", "preprocessed_features", "forecasts", "tiles", "p
 
 def main() -> int:
     settings = StorageSettings.from_env()
-    if not settings.enabled:
-        raise SystemExit("Set TERRA_STORAGE_ENABLED=true before inspecting storage.")
 
     store = MongoMinioStore(settings)
     try:

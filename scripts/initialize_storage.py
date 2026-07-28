@@ -18,8 +18,6 @@ from forecaster.storage import MongoMinioStore, StorageConfigurationError, Stora
 def main() -> int:
     try:
         settings = StorageSettings.from_env()
-        if not settings.enabled:
-            raise StorageConfigurationError("Set TERRA_STORAGE_ENABLED=true before initializing storage.")
         store = MongoMinioStore(settings)
         store.initialize()
         print(f"Storage initialized for aoi={settings.aoi_id} database={settings.mongo_database} bucket={settings.minio_bucket}")

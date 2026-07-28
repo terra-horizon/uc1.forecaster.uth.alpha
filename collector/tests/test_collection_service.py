@@ -218,6 +218,39 @@ def test_initial_token_failure_rotates_to_backup(monkeypatch, capsys):
     assert "backup-secret" not in output
 
 
+def test_statistics_tries_every_credential_before_exhausting_retries(monkeypatch):
+    class Response:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    responses = iter([Response(403), Response(403), Response(403), Response(403), Response(200)])
+    monkeypatch.setattr("data_collection.collectors.sentinel2.requests.post", lambda *args, **kwargs: next(responses))
+
+    collector = StatisticalCollection.__new__(StatisticalCollection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "primary-token"
+    collector.max_cloud_coverage = 30
+    collector.credential_index = 0
+    collector.credential_sets = [
+        {"label": label, "client_id": f"{label}-id", "client_secret": f"{label}-secret"}
+        for label in ("primary", "backup", "backup_2", "backup_3", "backup_4")
+    ]
+
+    def switch_to_next_credentials(_status_code):
+        if collector.credential_index + 1 >= len(collector.credential_sets):
+            return False
+        collector.credential_index += 1
+        collector.access_token = f"token-{collector.credential_index}"
+        return True
+
+    collector._switch_to_next_credentials = switch_to_next_credentials
+
+    response = collector.get_request("//VERSION=3", ("2026-06-01", "2026-06-01"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 200
+    assert collector.credential_index == 4
+
+
 def test_retryable_failure_is_not_written_as_no_data_and_resumes(tmp_path):
     failing = CollectionService(
         discovery_factory=lambda _cloud: FakeDiscovery(DATES),

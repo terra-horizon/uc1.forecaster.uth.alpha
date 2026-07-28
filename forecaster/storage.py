@@ -54,24 +54,20 @@ def _as_bool(value: str | None, *, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class StorageSettings:
-    enabled: bool
     aoi_id: str
-    mongo_uri: str | None = None
-    mongo_database: str | None = None
-    minio_endpoint: str | None = None
-    minio_access_key: str | None = None
-    minio_secret_key: str | None = None
-    minio_bucket: str | None = None
+    mongo_uri: str
+    mongo_database: str
+    minio_endpoint: str
+    minio_access_key: str
+    minio_secret_key: str
+    minio_bucket: str
     minio_verify_tls: str | bool = True
 
     @classmethod
-    def from_env(cls, *, default_aoi_id: str | None = None) -> "StorageSettings":
-        enabled = _as_bool(os.getenv("TERRA_STORAGE_ENABLED"), default=False)
-        aoi_id = os.getenv("TERRA_AOI_ID") or default_aoi_id
+    def from_env(cls) -> "StorageSettings":
+        aoi_id = os.getenv("TERRA_AOI_ID")
         if not aoi_id:
             raise StorageConfigurationError("Set TERRA_AOI_ID to the physical study area, for example 'my-river'.")
-        if not enabled:
-            return cls(enabled=False, aoi_id=aoi_id)
 
         mongo_uri = _required(
             "MONGO_URI",
@@ -89,11 +85,13 @@ class StorageSettings:
             "MINIO_ENDPOINT",
             hint="Set it to the MinIO S3 API URL, for example http://minio:9000 or https://minio.example.org.",
         )
+        parsed_endpoint = urlsplit(endpoint)
+        if parsed_endpoint.scheme not in {"http", "https"} or not parsed_endpoint.hostname:
+            raise StorageConfigurationError("MINIO_ENDPOINT must be a complete HTTP(S) URL, for example https://minio.example.org.")
         verify: str | bool = _as_bool(os.getenv("MINIO_VERIFY_TLS"), default=True)
         if os.getenv("MINIO_CA_BUNDLE"):
             verify = os.environ["MINIO_CA_BUNDLE"]
         return cls(
-            enabled=True,
             aoi_id=aoi_id,
             mongo_uri=mongo_uri,
             mongo_database=database,
@@ -111,8 +109,6 @@ class StorageSettings:
     @property
     def mongo_target(self) -> str:
         """A credential-free target suitable for logs and errors."""
-        if not self.mongo_uri:
-            return "unconfigured"
         parsed = urlsplit(self.mongo_uri)
         try:
             port = f":{parsed.port}" if parsed.port else ""
@@ -132,13 +128,7 @@ class MongoMinioStore:
         self._s3 = None
 
     @property
-    def enabled(self) -> bool:
-        return self.settings.enabled
-
-    @property
     def database(self):
-        if not self.enabled:
-            raise RuntimeError("Remote storage is disabled.")
         if self._client is None:
             self._client = MongoClient(
                 self.settings.mongo_uri,
@@ -149,8 +139,6 @@ class MongoMinioStore:
 
     @property
     def s3(self):
-        if not self.enabled:
-            raise RuntimeError("Remote storage is disabled.")
         if self._s3 is None:
             # Set MINIO_VERIFY_TLS=false only for a development endpoint that
             # cannot provide a trusted certificate.
@@ -174,8 +162,6 @@ class MongoMinioStore:
             self._client.close()
 
     def initialize(self) -> None:
-        if not self.enabled:
-            return
         try:
             self.database.command("ping")
         except (PyMongoError, ValueError) as exc:
@@ -219,8 +205,6 @@ class MongoMinioStore:
         return self.upload_json_if_changed(definition, key=key)
 
     def load_observations(self) -> list[dict[str, Any]]:
-        if not self.enabled:
-            return []
         return [self._without_id(row) for row in self.database["observations"].find({"aoi_id": self.settings.aoi_id}).sort([("tile_id", 1), ("observation_date", 1)])]
 
     def upsert_observations(self, records: list[dict[str, Any]], *, run_id: str) -> None:
@@ -237,17 +221,18 @@ class MongoMinioStore:
         self._upsert_many("forecasts", records, ("aoi_id", "forecast_run_id", "tile_id", "forecast_date", "step"), run_id=run_id)
 
     def record_run(self, payload: dict[str, Any], *, run_id: str) -> None:
-        if not self.enabled:
-            return
         now = _utc_now()
         document = {**payload, "run_id": run_id, "aoi_id": self.settings.aoi_id, "updated_at": now}
+        created_at = document.pop("created_at", now)
         if self.aoi_definition_hash:
             document["aoi_definition_hash"] = self.aoi_definition_hash
-        self.database["pipeline_runs"].update_one({"run_id": run_id}, {"$set": document, "$setOnInsert": {"created_at": now}}, upsert=True)
+        self.database["pipeline_runs"].update_one(
+            {"run_id": run_id},
+            {"$set": document, "$setOnInsert": {"created_at": created_at}},
+            upsert=True,
+        )
 
     def upload_json(self, value: Any, *, key: str) -> dict[str, Any]:
-        if not self.enabled:
-            return {}
         encoded = json.dumps(value, indent=2, allow_nan=False).encode("utf-8")
         checksum = hashlib.sha256(encoded).hexdigest()
         self.s3.put_object(Bucket=self.settings.minio_bucket, Key=key, Body=encoded, ContentType="application/json", Metadata={"sha256": checksum})
@@ -258,8 +243,6 @@ class MongoMinioStore:
 
     def upload_file(self, path: Path, *, key: str, content_type: str) -> dict[str, Any]:
         """Upload a non-JSON artifact such as GeoJSON or JSONL."""
-        if not self.enabled:
-            return {}
         encoded = path.read_bytes()
         checksum = hashlib.sha256(encoded).hexdigest()
         self.s3.put_object(
@@ -305,8 +288,6 @@ class MongoMinioStore:
 
     def download_json(self, *, key: str) -> Any | None:
         """Read an optional JSON object, returning None when it is absent."""
-        if not self.enabled:
-            return None
         try:
             response = self.s3.get_object(Bucket=self.settings.minio_bucket, Key=key)
         except ClientError as exc:
@@ -329,8 +310,6 @@ class MongoMinioStore:
         return self.run_key(run_id=run_id, relative_path=relative_path)
 
     def _remote_checksum(self, key: str) -> str | None:
-        if not self.enabled:
-            return None
         try:
             response = self.s3.head_object(Bucket=self.settings.minio_bucket, Key=key)
         except ClientError as exc:
@@ -340,15 +319,18 @@ class MongoMinioStore:
         return (response.get("Metadata") or {}).get("sha256")
 
     def _upsert_many(self, collection: str, records: list[dict[str, Any]], fields: tuple[str, ...], *, run_id: str) -> None:
-        if not self.enabled:
-            return
         now = _utc_now()
         for record in records:
             document = {**record, "aoi_id": self.settings.aoi_id, "last_run_id": run_id, "updated_at": now}
+            created_at = document.pop("created_at", now)
             if self.aoi_definition_hash:
                 document["aoi_definition_hash"] = self.aoi_definition_hash
             selector = {field: document[field] for field in fields}
-            self.database[collection].update_one(selector, {"$set": document, "$setOnInsert": {"created_at": document.get("created_at", now)}}, upsert=True)
+            self.database[collection].update_one(
+                selector,
+                {"$set": document, "$setOnInsert": {"created_at": created_at}},
+                upsert=True,
+            )
 
     @staticmethod
     def _without_id(value: dict[str, Any]) -> dict[str, Any]:
