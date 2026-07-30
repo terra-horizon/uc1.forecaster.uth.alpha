@@ -40,17 +40,17 @@ complete Hydrological and Water-Quality Digital Twin.
 
 ## Operational Entry Point
 
-The deployment entrypoint is `forecaster.scheduled_pipeline`. Each invocation
-restores the AOI state, collects missing or retryable observations, persists
-the durable artifacts, and runs inference only when a new forecast is needed.
+The deployment entrypoint is `forecaster.from_storage`. It reads the
+collector-published AOI history and tiles, then runs model inference without
+calling Sentinel collection APIs.
 
 ```bash
 docker compose --env-file .env run --rm forecaster \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --aoi-id sperchios \
   --run-name uc1-dev
 ```
 
-`forecaster.inference` remains available for direct, local one-off inference;
-it does not replace the scheduled storage workflow. See
+For a local collector-to-forecaster handoff, add `--collection-run-dir` and
+`--no-publish`. See
 [Deployment](deployment.md), [Configuration](configuration.md), and the
 [repository data contract](https://github.com/terra-horizon/uc1.forecaster.uth.alpha/blob/main/collector/DATA_CONTRACT.md).

@@ -12,8 +12,6 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY config ./config
-COPY collector ./collector
-COPY collector_bootstrap.py ./collector_bootstrap.py
 COPY forecaster ./forecaster
 COPY hydro ./hydro
 COPY scripts ./scripts
@@ -26,4 +24,4 @@ RUN useradd --create-home --shell /usr/sbin/nologin terra \
 
 USER terra
 
-ENTRYPOINT ["python", "-m", "forecaster.scheduled_pipeline"]
+ENTRYPOINT ["python", "-m", "forecaster.from_storage"]

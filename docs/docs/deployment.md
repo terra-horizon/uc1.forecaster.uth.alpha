@@ -46,14 +46,12 @@ Use a server scheduler to execute the same one-shot Compose command with a
 stable `uc1-prod` run label. Store the production `.env` outside source control
 and deploy an immutable image tag.
 
-## Direct one-off inference
+## Storage-backed forecasting
 
-For debugging without the MongoDB/MinIO persistence workflow:
+For forecasting from collector-published UTH storage:
 
 ```bash
-docker compose --env-file .env run --rm --entrypoint python forecaster \
-  -m forecaster.inference \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --target-date 2026-05-27 \
-  --run-name manual-inference
+docker compose --env-file .env run --rm forecaster \
+  --aoi-id sperchios \
+  --run-name sperchios-forecast
 ```

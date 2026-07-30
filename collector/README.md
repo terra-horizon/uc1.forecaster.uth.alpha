@@ -2,10 +2,8 @@
 
 This folder is the standalone collector module for the TERRA UC1 water-quality pipeline. It owns Sentinel-2 discovery, river tiling, statistical metric collection for every tile, incremental history, validation, and collection state.
 
-For normal deployment, run the repository-level
-`forecaster.scheduled_pipeline`; it invokes this module and persists results to
-configured MongoDB and MinIO endpoints. Use this CLI when developing or
-validating the collector in isolation.
+Run this module independently. It owns collection and publishes its stable
+AOI/tile/observation contract for the separately deployed forecaster.
 
 ## Install
 
@@ -169,7 +167,8 @@ from data_collection import CollectionRequest, collect
 result = collect(CollectionRequest(...))
 ```
 
-The forecasting repository currently calls the same service through `LocalCollectionProvider`. A future HTTP client can implement the same request/result contract without changing preprocessing or forecasting.
+The forecaster is independent of this module and consumes the published
+collection contract through a run directory or shared storage.
 
 ## Tests
 

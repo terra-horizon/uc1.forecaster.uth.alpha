@@ -77,12 +77,11 @@ operational label such as `uc1-dev` or `uc1-prod`, not part of the storage key.
 * `--max-days-per-run`, `--max-tiles-per-run`: bound a commissioning run.
 * `--skip-inference`: collect and persist without creating a forecast.
 
-### Direct inference arguments
+### Forecaster arguments
 
-`python -m forecaster.inference` supports one-off local inference. In addition
-to `--bbox`, `--target-date`, `--output-root`, and `--run-name`, it accepts:
+`python -m forecaster.from_storage` reads a collector-published AOI. It accepts:
 
-* `--skip-images`: skip exact target-date image downloads.
-* `--per-tile-images`: download imagery for every selected tile.
-* `--skip-global-image`: skip the global AOI image.
-* `--image-keys`: comma-separated target-date image products.
+* `--aoi-id`: stable AOI identity used to find the data.
+* `--as-of-date`: optional upper bound for the observation anchor.
+* `--collection-run-dir`: an explicit completed collector output directory.
+* `--no-publish`: keep a local handoff verification entirely local.

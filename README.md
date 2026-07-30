@@ -65,21 +65,16 @@ Before data reaches the model, it goes through several critical pre-processing s
 
 ## Execution Model
 
-The repository has two execution paths which share the same inference engine:
+The collector and forecaster run as independent components:
 
 ```text
-forecaster.scheduled_pipeline  ->  forecaster.inference  ->  model forecast
-       daily / on-demand             core preprocessing
-       collection + storage          + ML inference
+collector service  ->  MongoDB / MinIO or collection-run directory  ->  forecaster.from_storage
 ```
 
-- `forecaster.scheduled_pipeline` is the operational entrypoint. Use it for
-  daily scheduling and on-demand updates. It restores prior state, collects
-  only missing/retryable observations, updates MongoDB and MinIO, and calls
-  the inference engine only when a forecast is needed.
-- `forecaster.inference` is the core one-off inference engine. Use it for
-  development, debugging, or a manual forecast for one target date. It writes
-  local run outputs but does not perform the incremental MongoDB/MinIO workflow.
+- The collector owns Sentinel discovery, tile extraction, and observation
+  publication.
+- `forecaster.from_storage` is the operational forecaster. It reads the
+  collector's AOI-scoped data and produces forecasts without CDSE access.
 
 The operational flow is:
 
@@ -91,18 +86,20 @@ The operational flow is:
 6. **Inference**: The pre-processed 5-day time series is passed to the Global BiLSTM model to forecast the future state of the water quality indicators.
 7. **Export**: Predictions are saved as `.json` and `.csv` files, alongside visual plots showing history vs. forecast.
 
-The scheduled pipeline uses the tracked [standalone collector module](collector/README.md) through a local provider contract. The collector gathers every available tile/date record. The forecaster owns historical water screening and selects tiles with enough usable water observations before inference. Collection state and history remain independent from processing and forecast state, allowing the local provider to be replaced by an HTTP integration later. Every scheduled run requires MongoDB and MinIO and persists its results to both.
+The collector and forecaster exchange a stable AOI, tile, and observation
+contract. The forecaster selects tiles with enough usable collected history and
+persists its own forecast artifacts to MongoDB and MinIO.
 
-### Direct one-off inference
+### Forecast from collector data
 
 This is optional and does not replace the scheduled pipeline in deployment:
 
 ```bash
-python -m forecaster.inference \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --target-date 2026-05-27 \
+python -m forecaster.from_storage \
+  --aoi-id sperchios \
   --run-name "sperchios_test_run" \
-  --output-root "inference_results"
+  --collection-run-dir outputs/collector/sperchios_collection \
+  --no-publish
 ```
 
 Target-date imagery is requested for the exact anchor date only. If Sentinel-2 or Sentinel-3 imagery is not available on that date, the run records `status: unavailable` and `actual_date: "N/A"` in `inference_plan.json` instead of silently falling back to another date.
@@ -140,9 +137,8 @@ be remote, local, or supplied by another Docker deployment.
 
 ## Docker Usage
 
-The Docker image runs `forecaster.scheduled_pipeline` by default. One container
-invocation performs one backfill or incremental update and then exits. A server
-scheduler such as cron or a systemd timer should trigger it periodically.
+The Docker image runs `forecaster.from_storage` by default. One invocation
+reads a published AOI dataset and then exits.
 
 ### Build and inspect the image
 
@@ -200,25 +196,22 @@ If MongoDB or MinIO is unreachable, the preflight and pipeline exit with a
 credential-safe error naming the failed target and the relevant configuration
 variables. Credentials are never included in those messages.
 
-The image runs as a non-root user and uses `forecaster.scheduled_pipeline` as
+The image runs as a non-root user and uses `forecaster.from_storage` as
 its entrypoint. It writes queryable records to MongoDB and JSON/GeoJSON/STAC
 artifacts to MinIO.
 
-### Run direct inference in Docker
+### Run the storage-backed forecaster in Docker
 
-For manual debugging or a one-off target date, override the operational
-entrypoint explicitly:
+Pass the AOI published by the collector:
 
 ```bash
-docker compose --env-file .env run --rm --entrypoint python forecaster \
-  -m forecaster.inference \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --target-date 2026-05-27 \
-  --run-name manual-inference
+docker compose --env-file .env run --rm forecaster \
+  --aoi-id sperchios \
+  --run-name sperchios-forecast
 ```
 
-This command produces local run outputs only; use the scheduled pipeline for
-incremental persistence and normal operations.
+The forecaster reads collected data from the configured UTH MongoDB/MinIO
+storage and persists forecast results there.
 
 ### Backfill and incremental runs
 

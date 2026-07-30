@@ -18,7 +18,6 @@ import pandas as pd
 import tensorflow as tf
 from keras import ops as K
 
-from hydro.river_tile_extractor import RiverTileExtractor, RiverTileExtractorConfig
 from forecaster.core.global_preprocessor import (
     NON_NEGATIVE_COLS,
     SPATIAL_FEATURE_NAMES,
@@ -34,7 +33,6 @@ class HorizonWeightedLoss(tf.keras.losses.Loss):
     def call(self, y_true, y_pred): return 0.0
 
 from forecaster.models.multi_feature_model_v15 import HorizonVelocityScale, build_model
-from forecaster.water_tile_selector import WaterTileSelector, print_selection_summary
 
 
 FORECASTER_DIR = Path(__file__).resolve().parent
@@ -119,6 +117,13 @@ class AOIInferencePipeline:
         self.result_path = self.run_dir / "pipeline_result.json"
 
     def execute(self) -> dict[str, Any]:
+        raise RuntimeError(
+            "The combined collection/inference pipeline was retired. "
+            "Run `python -m forecaster.from_storage` with a collector run directory or shared AOI storage."
+        )
+
+        # Historical implementation retained below temporarily for source
+        # archaeology only; it is unreachable and no longer an entrypoint.
         self.run_dir.mkdir(parents=True, exist_ok=True)
         result = self._base_result()
         try:
@@ -374,8 +379,6 @@ class AOIInferencePipeline:
         requested_date: str,
         message: str,
     ) -> dict[str, dict[str, str | None]]:
-        from forecaster.data.collectors.sentinel2 import ImageCollection
-
         return {
             key: {
                 "status": "unavailable",
@@ -389,10 +392,6 @@ class AOIInferencePipeline:
         }
 
     def download_target_date_images(self, selected_records: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, str | None]]]:
-        # Keep collector loading within the legacy combined workflow.  The
-        # storage-backed forecaster can therefore load the model independently.
-        from forecaster.data.collectors.sentinel2 import ImageCollection
-
         if not selected_records and not self.config.global_image:
             return {}
 
@@ -472,9 +471,6 @@ class AOIInferencePipeline:
         history_start: str,
         history_end: str,
     ) -> dict[str, str]:
-        from forecaster.data.collectors.sentinel2 import StatisticalCollection
-        from forecaster.data.data_augmentation_5d_v2 import DataAugmentation
-
         feature_root = Path(self.config.feature_data_root) if self.config.feature_data_root else self.run_dir / "feature_data"
         csvs: dict[str, str] = {}
         if not selected_records:

@@ -1,17 +1,17 @@
 # Architecture
 
-The Alpha 1 deployment of TERRA Product Chain 1 is organized around
-`forecaster.scheduled_pipeline`. It calls `forecaster.inference` as its model
-engine when new usable observations require a forecast.
+The Alpha 1 deployment separates collection from forecasting. The collector
+publishes AOI-scoped observations; `forecaster.from_storage` retrieves them and
+runs the model without collector code or CDSE credentials.
 
 ## Component Boundaries
 
 | Component | Alpha 1 implementation |
 | --- | --- |
-| Data Fusion and Preprocessing | River tile extraction, water selection, Sentinel-2 and Sentinel-3 collection, gap interpolation, temporal encoding, and scaling. |
+| Data Fusion and Preprocessing | External collector: river tiling, Sentinel collection, quality flags, and observation publication. |
 | ML Model Inference | Bundled global multi-feature BiLSTM inference and forecast generation. |
 | Hydrological and Water-Quality Digital Twin | Geospatial and forecasting foundations only; the complete Digital Twin is not implemented. |
-| Pipeline Orchestration and Result Delivery | Incremental state coordination, storage updates, and artifact export through `forecaster.scheduled_pipeline`. |
+| Pipeline Orchestration and Result Delivery | AOI-addressed retrieval from UTH storage and forecast artifact export through `forecaster.from_storage`. |
 
 ## Pipeline
 

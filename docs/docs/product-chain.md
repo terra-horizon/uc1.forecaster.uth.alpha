@@ -84,9 +84,8 @@ component in Alpha 1.
 
 **Status:** Implemented in Alpha 1
 
-The `forecaster.scheduled_pipeline` coordinates incremental collection,
-persistence, and forecast triggering. It calls `forecaster.inference` for the
-core model work. Each run can produce:
+The collector and `forecaster.from_storage` run independently. The forecaster
+retrieves published AOI data and can produce:
 
 * the extracted river-tile GeoJSON and water-selection manifest;
 * exact target-date satellite images when available;

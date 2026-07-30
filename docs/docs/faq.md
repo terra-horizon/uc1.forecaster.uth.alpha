@@ -2,7 +2,7 @@
 
 ## Does the image expose an HTTP API?
 
-No. Alpha Version is a CLI image that runs `forecaster.scheduled_pipeline`.
+No. Alpha Version is a CLI image that runs `forecaster.from_storage`.
 
 ## Are CDSE credentials built into the Docker image?
 
@@ -10,10 +10,9 @@ No. Credentials must be supplied at runtime through environment variables or an 
 
 ## Where are outputs written?
 
-The scheduled pipeline writes canonical JSON/GeoJSON/STAC objects to the
-configured MinIO bucket and queryable documents to MongoDB. It also uses the
-mounted `data/inference_runs/` directory for local staging. Direct inference
-writes local outputs only.
+The forecaster writes forecast JSON/GeoJSON/STAC objects to the configured
+MinIO bucket and queryable forecast documents to MongoDB. It may also write
+local run outputs for audit and visualization.
 
 ## Does the image start MongoDB or MinIO?
 
