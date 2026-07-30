@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="Collect or update Sentinel-2 history")
     run.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"))
     run.add_argument("--run-name", required=True)
+    run.add_argument("--aoi-id", help="Stable physical AOI identifier; defaults to a normalized run name.")
     run.add_argument("--output-root", default="outputs")
     run.add_argument("--history-start", default="2016-01-01")
     run.add_argument("--target-date")
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     result = collect(CollectionRequest(
         aoi_bbox=list(args.bbox),
         run_name=args.run_name,
+        aoi_id=args.aoi_id,
         output_root=Path(args.output_root),
         history_start=args.history_start,
         target_date=args.target_date,

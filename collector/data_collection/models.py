@@ -12,6 +12,7 @@ CollectionMode = Literal["auto", "backfill", "incremental"]
 class CollectionRequest:
     aoi_bbox: list[float]
     run_name: str
+    aoi_id: str | None = None
     output_root: Path | str = Path("outputs")
     history_start: str = "2016-01-01"
     target_date: str | None = None

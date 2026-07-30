@@ -64,8 +64,9 @@ class StorageSettings:
     minio_verify_tls: str | bool = True
 
     @classmethod
-    def from_env(cls) -> "StorageSettings":
-        aoi_id = os.getenv("TERRA_AOI_ID")
+    def from_env(cls, *, aoi_id: str | None = None) -> "StorageSettings":
+        """Load shared storage settings, optionally for an explicit AOI."""
+        aoi_id = aoi_id or os.getenv("TERRA_AOI_ID")
         if not aoi_id:
             raise StorageConfigurationError("Set TERRA_AOI_ID to the physical study area, for example 'my-river'.")
 
@@ -204,8 +205,28 @@ class MongoMinioStore:
             )
         return self.upload_json_if_changed(definition, key=key)
 
-    def load_observations(self) -> list[dict[str, Any]]:
-        return [self._without_id(row) for row in self.database["observations"].find({"aoi_id": self.settings.aoi_id}).sort([("tile_id", 1), ("observation_date", 1)])]
+    def load_observations(
+        self,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return canonical collector observations for this AOI and interval."""
+        query: dict[str, Any] = {"aoi_id": self.settings.aoi_id}
+        bounds = {operator: value for operator, value in (("$gte", start_date), ("$lte", end_date)) if value}
+        if bounds:
+            query["observation_date"] = bounds
+        return [
+            self._without_id(row)
+            for row in self.database["observations"].find(query).sort([("tile_id", 1), ("observation_date", 1)])
+        ]
+
+    def load_tiles(self) -> list[dict[str, Any]]:
+        """Return the collector's stable tile definitions for this AOI."""
+        return [
+            self._without_id(row)
+            for row in self.database["tiles"].find({"aoi_id": self.settings.aoi_id}).sort([("tile_id", 1)])
+        ]
 
     def upsert_observations(self, records: list[dict[str, Any]], *, run_id: str) -> None:
         self._upsert_many("observations", records, ("aoi_id", "tile_id", "observation_date"), run_id=run_id)

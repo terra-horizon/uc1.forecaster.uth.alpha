@@ -203,6 +203,19 @@ class CollectionService:
             tiles_geojson_path=tiles_geojson,
         )
         write_json(self.run_dir / "collection" / "collection_run_result.json", result.to_dict())
+        # This is the stable handoff descriptor for a separately deployed
+        # forecaster.  It contains only routing/geometry metadata; the actual
+        # observations remain in the history artifacts named by the result.
+        write_json(self.run_dir / "collection" / "collection_input_manifest.json", {
+            "schema_version": "1.0.0",
+            "aoi_id": request.aoi_id or _slugify(request.run_name),
+            "aoi_bbox": list(request.aoi_bbox),
+            "projected_crs": request.projected_crs,
+            "run_name": request.run_name,
+            "history_json_path": result.history_json_path,
+            "tile_records_path": result.tile_records_path,
+            "collection_result_path": str(self.run_dir / "collection" / "collection_run_result.json"),
+        })
         return result
 
     def _load_state(self) -> tuple[dict[str, Any], bool]:
