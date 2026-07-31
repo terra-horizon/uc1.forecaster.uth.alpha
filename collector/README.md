@@ -24,17 +24,33 @@ files or logs.
 
 ## Run
 
-The command shape is:
+### Simple launcher (no package installation)
+
+From this `collector/` folder, use the included launcher. It calls the same
+collector CLI, so the next developer does not need to know Python module paths:
 
 ```bash
-python -m data_collection run --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT --run-name NAME [options]
+python3 collect.py --help
+python3 collect.py run --help
+python3 collect.py validate --help
 ```
+
+The normal command shape is:
+
+```bash
+python3 collect.py run --aoi-id AOI_ID --bbox MIN_LON MIN_LAT MAX_LON MAX_LAT --run-name NAME [options]
+```
+
+`--aoi-id` is the stable physical-area identifier used by the independent
+forecaster to find this collection. `--run-name` identifies the local output
+folder and should be reused for incremental runs of the same AOI.
 
 The first automatic run performs a resumable historical backfill. Later runs
 discover and collect only incomplete or newly available tile-date units.
 
 ```bash
-python -m data_collection run \
+python3 collect.py run \
+  --aoi-id sperchios \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
   --run-name sperchios \
   --output-root outputs \
@@ -45,7 +61,8 @@ python -m data_collection run \
 Use a bounded run while commissioning the collector:
 
 ```bash
-python -m data_collection run \
+python3 collect.py run \
+  --aoi-id sperchios \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
   --run-name sperchios \
   --output-root outputs \
@@ -58,7 +75,8 @@ python -m data_collection run \
 Inspect discovery without writing files:
 
 ```bash
-python -m data_collection run \
+python3 collect.py run \
+  --aoi-id sperchios \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
   --run-name sperchios \
   --output-root outputs \
@@ -70,18 +88,19 @@ python -m data_collection run \
 Validate a completed or partial run:
 
 ```bash
-python -m data_collection validate --run-dir outputs/sperchios
+python3 collect.py validate --run-dir outputs/sperchios
 ```
 
 ## Run inputs
 
-All inputs accepted by `python -m data_collection run` are listed below. Dates
+All inputs accepted by `python3 collect.py run` are listed below. Dates
 use `YYYY-MM-DD`; the bounding box uses EPSG:4326 coordinate order
 `min_lon min_lat max_lon max_lat`.
 
 | Input | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | Yes | — | Area of interest used for STAC discovery and river-tile extraction. Four decimal-degree coordinates in west, south, east, north order. |
+| `--aoi-id ID` | No | Normalized `--run-name` | Stable physical AOI identifier published in the collector manifest. Use the same ID when running the independent forecaster. |
 | `--run-name NAME` | Yes | — | Stable local run identifier. It is normalized into the output directory name; reuse the same name for incremental updates of the same AOI and tile configuration. |
 | `--output-root PATH` | No | `outputs` | Parent directory for the collector run directory. The collector writes to `PATH/<normalized-run-name>/`. |
 | `--history-start DATE` | No | `2016-01-01` | First date considered during a historical backfill. |
