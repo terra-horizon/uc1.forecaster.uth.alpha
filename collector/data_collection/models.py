@@ -26,6 +26,7 @@ class CollectionRequest:
     min_river_length_m: float = 10_000.0
     projected_crs: str = "EPSG:32634"
     max_cloud_coverage: int = 30
+    publish: bool = True
 
     def __post_init__(self) -> None:
         if len(self.aoi_bbox) != 4:

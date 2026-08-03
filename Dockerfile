@@ -17,8 +17,6 @@ COPY hydro ./hydro
 COPY scripts ./scripts
 COPY README.md ./README.md
 
-RUN pip install ./collector
-
 RUN useradd --create-home --shell /usr/sbin/nologin terra \
     && chown -R terra:terra /app
 

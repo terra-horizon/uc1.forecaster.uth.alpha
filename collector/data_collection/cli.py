@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .models import CollectionRequest
+from .remote_storage import StorageConfigurationError, StorageConnectionError
 from .service import collect
 from .validation import validate_run
 
@@ -29,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--min-river-length-m", type=float, default=10_000.0)
     run.add_argument("--projected-crs", default="EPSG:32634")
     run.add_argument("--max-cloud-coverage", type=int, default=30)
+    run.add_argument("--no-publish", action="store_true", help="Keep outputs local and do not write MongoDB or MinIO.")
 
     validate = subparsers.add_parser("validate", help="Validate an existing collector run")
     validate.add_argument("--run-dir", required=True)
@@ -42,23 +44,28 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
         return 0 if report["valid"] else 1
 
-    result = collect(CollectionRequest(
-        aoi_bbox=list(args.bbox),
-        run_name=args.run_name,
-        aoi_id=args.aoi_id,
-        output_root=Path(args.output_root),
-        history_start=args.history_start,
-        target_date=args.target_date,
-        mode=args.mode,
-        dry_run=args.dry_run,
-        max_days_per_run=args.max_days_per_run,
-        max_tiles_per_run=args.max_tiles_per_run,
-        discovery_chunk_days=args.discovery_chunk_days,
-        spacing_m=args.spacing_m,
-        box_size_m=args.box_size_m,
-        min_river_length_m=args.min_river_length_m,
-        projected_crs=args.projected_crs,
-        max_cloud_coverage=args.max_cloud_coverage,
-    ))
+    try:
+        result = collect(CollectionRequest(
+            aoi_bbox=list(args.bbox),
+            run_name=args.run_name,
+            aoi_id=args.aoi_id,
+            output_root=Path(args.output_root),
+            history_start=args.history_start,
+            target_date=args.target_date,
+            mode=args.mode,
+            dry_run=args.dry_run,
+            max_days_per_run=args.max_days_per_run,
+            max_tiles_per_run=args.max_tiles_per_run,
+            discovery_chunk_days=args.discovery_chunk_days,
+            spacing_m=args.spacing_m,
+            box_size_m=args.box_size_m,
+            min_river_length_m=args.min_river_length_m,
+            projected_crs=args.projected_crs,
+            max_cloud_coverage=args.max_cloud_coverage,
+            publish=not args.no_publish,
+        ))
+    except (StorageConfigurationError, StorageConnectionError) as exc:
+        print(f"Collector storage failed: {exc}")
+        return 2
     print(json.dumps(result.to_dict(), indent=2))
     return 0 if result.status in {"success", "dry_run"} else 2

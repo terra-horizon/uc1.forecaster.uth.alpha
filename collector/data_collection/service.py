@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -12,9 +13,11 @@ from typing import Any, Callable, Iterator
 import pandas as pd
 
 from .collectors.sentinel2 import StatisticalCollection
+from .credentials import load_local_env_if_present
 from .discovery import CDSEStacDiscovery
 from .models import CollectionRequest, CollectionResult
 from .river_tiles import RiverTileExtractor, RiverTileExtractorConfig
+from .remote_storage import CollectorStorageSettings, CollectorStore, build_aoi_definition
 from .storage import (
     TARGET_COLUMNS,
     CURRENT_COLLECTION_METHOD,
@@ -35,13 +38,16 @@ class CollectionService:
         discovery_factory: Callable[[int], Any] | None = None,
         statistics_factory: Callable[..., Any] = StatisticalCollection,
         tile_extractor_factory: Callable[[RiverTileExtractorConfig], Any] = RiverTileExtractor,
+        storage: CollectorStore | None = None,
     ):
         self.discovery_factory = discovery_factory or (lambda cloud: CDSEStacDiscovery(max_cloud_coverage=cloud))
         self.statistics_factory = statistics_factory
         self.tile_extractor_factory = tile_extractor_factory
+        self.storage = storage
         self.request: CollectionRequest | None = None
         self.run_dir = Path()
         self.log_path = Path()
+        self.execution_id = ""
 
     def collect(self, request: CollectionRequest) -> CollectionResult:
         self.request = request
@@ -51,7 +57,148 @@ class CollectionService:
             return self._execute()
         self.run_dir.mkdir(parents=True, exist_ok=True)
         with self._run_lock():
-            return self._execute()
+            if not request.publish:
+                return self._execute()
+            load_local_env_if_present()
+            aoi_id = request.aoi_id or _slugify(request.run_name)
+            self.execution_id = f"collector-run-{utc_now().replace(':', '')}-{uuid.uuid4().hex[:8]}"
+            storage = self.storage or CollectorStore(CollectorStorageSettings.from_env(aoi_id=aoi_id))
+            self.storage = storage
+            try:
+                storage.initialize()
+                storage.ensure_aoi_definition(build_aoi_definition(
+                    aoi_id=aoi_id,
+                    bbox=list(request.aoi_bbox),
+                    projected_crs=request.projected_crs,
+                    spacing_m=request.spacing_m,
+                    box_size_m=request.box_size_m,
+                    min_river_length_m=request.min_river_length_m,
+                ))
+                self._hydrate_remote_collection()
+                storage.record_run({
+                    "run_name": request.run_name,
+                    "status": "running",
+                    "phase": "collection",
+                    "mode": request.mode,
+                }, run_id=self.execution_id)
+                result = self._execute()
+                artifacts = self._publish_collection(result)
+                storage.record_run({
+                    **result.to_dict(),
+                    "status": result.status,
+                    "phase": "complete",
+                    "artifacts": artifacts,
+                }, run_id=self.execution_id)
+                return result
+            except Exception as exc:
+                self._record_failed_run(exc)
+                raise
+            finally:
+                storage.close()
+
+    def _hydrate_remote_collection(self) -> None:
+        """Restore collector-owned state when the local run directory is new."""
+        assert self.storage is not None
+        history_path = self.run_dir / "history" / "global_history.json"
+        if not history_path.exists():
+            records = self.storage.load_observations()
+            if records:
+                HistoryStore(history_path, self.run_dir / "history" / "global_history.csv").write(records)
+
+        remote_files = {
+            "collection/state.json": "collection_state.json",
+            "tiles/tile_records.json": "tiles/tile_records.json",
+            "tiles/tile_state.json": "tiles/tile_state.json",
+            "tiles/river_tiles.geojson": "tiles/river_tiles.geojson",
+        }
+        for local_relative, remote_relative in remote_files.items():
+            path = self.run_dir / local_relative
+            if path.exists():
+                continue
+            value = self.storage.download_json(key=self.storage.aoi_key(relative_path=remote_relative))
+            if value is not None:
+                write_json(path, value)
+
+    def _record_failed_run(self, exc: Exception) -> None:
+        if self.storage is None or not self.execution_id:
+            return
+        try:
+            self.storage.record_run({
+                "run_name": self.request.run_name if self.request else None,
+                "status": "failed",
+                "phase": "collection",
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:2000],
+            }, run_id=self.execution_id)
+        except Exception:
+            # Preserve the original collection or publishing error.
+            pass
+
+    def _publish_collection(self, result: CollectionResult) -> list[dict[str, Any]]:
+        """Publish collector-owned canonical data and invocation artifacts."""
+        assert self.storage is not None
+        artifacts: list[dict[str, Any]] = []
+
+        def add(artifact: dict[str, Any]) -> dict[str, Any]:
+            artifacts.append(artifact)
+            return artifact
+
+        stable_files = {
+            "collection/state.json": ("collection_state.json", "application/json"),
+            "tiles/river_tiles.geojson": ("tiles/river_tiles.geojson", "application/geo+json"),
+            "tiles/tile_records.json": ("tiles/tile_records.json", "application/json"),
+            "tiles/tile_state.json": ("tiles/tile_state.json", "application/json"),
+        }
+        stable_artifacts: dict[str, dict[str, Any]] = {}
+        for local_relative, (remote_relative, content_type) in stable_files.items():
+            path = self.run_dir / local_relative
+            if path.exists():
+                stable_artifacts[local_relative] = add(self.storage.upload_file_if_changed(
+                    path,
+                    key=self.storage.aoi_key(relative_path=remote_relative),
+                    content_type=content_type,
+                ))
+
+        collection_state = read_json(self.run_dir / "collection" / "state.json", {})
+        if collection_state:
+            self.storage.upsert_collection_state(collection_state, run_id=self.execution_id)
+
+        history = read_json(Path(result.history_json_path), []) if result.history_json_path else []
+        by_date: dict[str, list[dict[str, Any]]] = {}
+        for record in history:
+            by_date.setdefault(str(record["observation_date"]), []).append(record)
+        observation_artifacts: dict[str, dict[str, Any]] = {}
+        for observation_date, records in sorted(by_date.items()):
+            observation_artifacts[observation_date] = add(self.storage.upload_json_if_changed(
+                records,
+                key=self.storage.data_key(relative_path=f"observations/{observation_date}.json"),
+            ))
+        self.storage.upsert_observations([
+            {**record, "artifact": observation_artifacts[str(record["observation_date"])]}
+            for record in history
+        ], run_id=self.execution_id)
+
+        tiles = read_json(Path(result.tile_records_path), []) if result.tile_records_path else []
+        tile_artifact = stable_artifacts.get("tiles/tile_records.json", {})
+        self.storage.upsert_tiles([
+            {**record, "artifact": tile_artifact} for record in tiles
+        ], run_id=self.execution_id)
+
+        run_files = {
+            "collection/collection_run_result.json": "application/json",
+            "collection/collection_input_manifest.json": "application/json",
+            "logs/collector.jsonl": "application/x-ndjson",
+        }
+        for relative, content_type in run_files.items():
+            path = self.run_dir / relative
+            if not path.exists():
+                continue
+            key = self.storage.run_key(run_id=self.execution_id, relative_path=relative)
+            if content_type == "application/json":
+                add(self.storage.upload_json_file(path, key=key))
+            else:
+                add(self.storage.upload_file(path, key=key, content_type=content_type))
+        return artifacts
 
     def _execute(self) -> CollectionResult:
         assert self.request is not None

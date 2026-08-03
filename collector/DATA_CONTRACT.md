@@ -92,6 +92,7 @@ flowchart TD
 |---|---|---|
 | `tiles` | Stable AOI tile definitions and geometry metadata | `aoi_id + tile_id` |
 | `observations` | Raw collector metrics for each tile and date | `aoi_id + tile_id + observation_date` |
+| `collection_state` | Latest incremental collector checkpoint and completion metadata | `aoi_id` |
 | `preprocessed_features` | Model-ready features derived from observations | `aoi_id + tile_id + feature_date + preprocessing_schema_version` |
 | `forecasts` | Forecast values by forecast cycle, tile, date, and step | `aoi_id + forecast_run_id + tile_id + forecast_date + step` |
 | `pipeline_runs` | Execution status, warnings, and artifact manifest | `run_id` |
@@ -105,6 +106,20 @@ Common relationships:
 - `aoi_definition_hash` verifies the same AOI definition and tile configuration.
 - `artifact` is an optional MinIO pointer stored with observations, features,
   and forecasts.
+- `component` distinguishes independent `collector` and `forecaster` run
+  records. Each module writes its own `running` and terminal status.
+
+## Persistence ownership and timing
+
+- The collector creates a `pipeline_runs` record with `component=collector`
+  and `status=running` before collection begins. After collection it publishes
+  `tiles`, `observations`, collection state, the collection result, manifest,
+  and logs, then updates the same run to `success` or `partial`. Exceptions
+  update it to `failed` when MongoDB remains reachable.
+- The forecaster reads `tiles` and `observations` without importing collector
+  code. It records `component=forecaster,status=running`, publishes
+  `preprocessed_features`, then `forecasts`, and finally updates the run to
+  `success`; exceptions are recorded as `failed` when possible.
 
 ## MinIO data structure
 

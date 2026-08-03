@@ -66,16 +66,17 @@ docker compose --env-file .env run --rm --entrypoint python forecaster scripts/s
 
 ## CLI Arguments
 
-### Scheduled pipeline arguments
+### Collector arguments
 
-The Docker entrypoint accepts `--bbox` and `--run-name`; `--run-name` is an
-operational label such as `uc1-dev` or `uc1-prod`, not part of the storage key.
+Run `python3 collector/collect.py run` with `--bbox`, `--aoi-id`, and
+`--run-name`. The AOI ID is the shared storage identity; the run name is a
+local operational label.
 
 * `--history-start`: start date for discovery; default `2016-01-01`.
 * `--target-date`: collection target date; defaults to today.
-* `--backfill-all`: process all historical discovery windows.
+* `--mode auto|backfill|incremental`: select discovery behavior.
 * `--max-days-per-run`, `--max-tiles-per-run`: bound a commissioning run.
-* `--skip-inference`: collect and persist without creating a forecast.
+* `--no-publish`: explicit local-only operation without MongoDB/MinIO writes.
 
 ### Forecaster arguments
 

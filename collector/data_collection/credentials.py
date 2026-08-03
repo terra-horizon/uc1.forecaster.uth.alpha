@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 _LOCAL_ENV_LOADED = False
 
-def _load_local_env_if_present() -> None:
+def load_local_env_if_present() -> None:
     global _LOCAL_ENV_LOADED
     if _LOCAL_ENV_LOADED:
         return
@@ -25,7 +25,7 @@ def _load_local_env_if_present() -> None:
 
 
 def _get_required_env(var_name: str) -> str:
-    _load_local_env_if_present()
+    load_local_env_if_present()
     value = os.getenv(var_name)
     if not value:
         raise RuntimeError(
@@ -36,7 +36,7 @@ def _get_required_env(var_name: str) -> str:
 
 
 def _get_optional_env(*var_names: str) -> str | None:
-    _load_local_env_if_present()
+    load_local_env_if_present()
     for var_name in var_names:
         value = os.getenv(var_name)
         if value:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,12 +91,41 @@ class StoredForecastPipeline:
             if config.collection_run_dir is None or config.publish else None
         )
         self.run_dir = Path(config.output_root) / _slug(config.run_name)
-        self.execution_id = f"forecast-run-{_utc_now().replace(':', '')}"
+        self.execution_id = f"forecast-run-{_utc_now().replace(':', '')}-{uuid.uuid4().hex[:8]}"
 
     def execute(self) -> dict[str, Any]:
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        if self.storage is not None:
+        if self.storage is None:
+            return self._execute()
+        try:
             self.storage.initialize()
+            if self.config.publish:
+                self.storage.record_run({
+                    "component": "forecaster",
+                    "run_name": self.config.run_name,
+                    "status": "running",
+                    "phase": "loading_inputs",
+                    "source": "collector_run_directory" if self.config.collection_run_dir else "shared_storage",
+                }, run_id=self.execution_id)
+            return self._execute()
+        except Exception as exc:
+            if self.config.publish:
+                try:
+                    self.storage.record_run({
+                        "component": "forecaster",
+                        "run_name": self.config.run_name,
+                        "status": "failed",
+                        "phase": "forecasting",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:2000],
+                    }, run_id=self.execution_id)
+                except Exception:
+                    pass
+            raise
+        finally:
+            self.storage.close()
+
+    def _execute(self) -> dict[str, Any]:
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.config.collection_run_dir:
             definition, tiles, records = self._load_local_collection_input()
         else:
@@ -162,12 +192,15 @@ class StoredForecastPipeline:
             self.storage.upsert_forecasts([{**row, "artifact": artifact} for row in rows], run_id=self.execution_id)
         result = {
             "status": "success",
+            "component": "forecaster",
+            "phase": "complete",
             "aoi_id": self.config.aoi_id,
             "run_name": self.config.run_name,
             "forecast_run_id": forecast_run_id,
             "forecast_anchor": anchor_date,
             "input_observation_count": len(records),
             "usable_observation_count": len(usable),
+            "preprocessed_tile_count": len(feature_csvs),
             "forecast_row_count": len(rows),
             "forecast_tiles": sorted(feature_csvs),
             "stac_item_id": stac_result.item_id,
@@ -248,6 +281,24 @@ class StoredForecastPipeline:
             path = self.run_dir / "feature_data" / tile_id / "csv" / DEFAULT_FEATURE_CSV_NAME
             path.parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(rows).to_csv(path, index=False)
+            if self.storage is not None and self.config.publish:
+                feature_rows = [
+                    {
+                        "tile_id": tile_id,
+                        "feature_date": row["date"],
+                        "preprocessing_schema_version": "1.0.0",
+                        **row,
+                    }
+                    for row in rows
+                ]
+                artifact = self.storage.upload_json_if_changed(
+                    feature_rows,
+                    key=self.storage.data_key(relative_path=f"preprocessed/features/{tile_id}.json"),
+                )
+                self.storage.upsert_features(
+                    [{**row, "artifact": artifact} for row in feature_rows],
+                    run_id=self.execution_id,
+                )
             output[tile_id] = str(path)
         return output
 

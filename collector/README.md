@@ -16,13 +16,26 @@ source .venv/bin/activate
 python3 -m pip install -e ".[test]"
 ```
 
-Create the repository-root `.env` from `../.env.example`, then set
-`CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET`. Optional backup credentials use
+Create the repository-root `.env` from `../.env.example`, then set the CDSE,
+MongoDB, and MinIO application credentials. Optional CDSE backup credentials use
 `CDSE_BACKUP_CLIENT_ID`, `CDSE_BACKUP_CLIENT_SECRET`, and numbered pairs
 through `CDSE_BACKUP_9_*`. Credentials and tokens are never written to output
 files or logs.
 
 ## Run
+
+### Independent collector image
+
+Build the collector without the forecaster package:
+
+```bash
+docker build -t terra-uc1-collector:local collector
+```
+
+The image entrypoint is `python collect.py`. Supply the CDSE and storage
+variables through your approved runtime secret mechanism and pass `run` plus
+the normal collector arguments. The forecaster image is built separately from
+the repository-root `Dockerfile` and does not install or import this package.
 
 ### Simple launcher (no package installation)
 
@@ -32,7 +45,7 @@ collector CLI, so the next developer does not need to know Python module paths:
 ```bash
 python3 collect.py --help
 python3 collect.py run --help
-python3 collect.py validate --help
+python3 collect.py validate --help  
 ```
 
 The normal command shape is:
@@ -47,6 +60,23 @@ folder and should be reused for incremental runs of the same AOI.
 
 The first automatic run performs a resumable historical backfill. Later runs
 discover and collect only incomplete or newly available tile-date units.
+Each non-dry run publishes the collector-owned AOI definition, tiles,
+observations, checkpoint, invocation artifacts, and run status to MongoDB and
+MinIO. Use `--no-publish` only for explicit local/offline operation.
+
+For an orchestrated environment using Docker Compose, the command shape is:
+
+```bash
+docker-compose run --rm collector run \
+  --aoi-id sperchios \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name sperchios \
+  --output-root outputs \
+  --history-start 2016-01-01 \
+  --mode auto
+```
+
+Or using the local python launcher directly:
 
 ```bash
 python3 collect.py run \
@@ -115,6 +145,7 @@ use `YYYY-MM-DD`; the bounding box uses EPSG:4326 coordinate order
 | `--min-river-length-m N` | No | `10000.0` | Minimum river-geometry length in metres required to generate tiles. |
 | `--projected-crs CRS` | No | `EPSG:32634` | Projected CRS used for metre-based river length and tile calculations. Select a CRS appropriate for the AOI. |
 | `--max-cloud-coverage N` | No | `30` | Maximum Sentinel-2 cloud-cover percentage accepted by CDSE discovery and statistics requests. |
+| `--no-publish` | No | Off | Keep the collector contract local; do not connect to or write MongoDB/MinIO. |
 
 Changing the AOI, tile parameters, or projected CRS while reusing a run name
 invalidates the cached tile set. Use a new run name or output root when keeping
@@ -140,6 +171,11 @@ files or logs.
 | `CDSE_BACKUP_CLIENT_ID`, `CDSE_BACKUP_CLIENT_SECRET` | No | First fallback credential pair. `CDSE_FALLBACK_CLIENT_ID` and `CDSE_FALLBACK_CLIENT_SECRET` are accepted aliases. |
 | `CDSE_BACKUP_2_CLIENT_ID` … `CDSE_BACKUP_9_CLIENT_ID` and matching secrets | No | Additional fallback credential pairs. A pair is used only when both values are set. |
 | `DATA_COLLECTION_ENV_FILE` | No | Explicit path to an environment file. If unset, the collector searches for `.env` from the current directory, collector directory, then repository root. |
+| `MONGO_URI` | Yes unless `--no-publish` | Complete application MongoDB URI including database and authentication source. |
+| `MINIO_ENDPOINT` | Yes unless `--no-publish` | Complete MinIO S3 API HTTP(S) endpoint. |
+| `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Yes unless `--no-publish` | MinIO application credentials. |
+| `MINIO_BUCKET_NAME` | Yes unless `--no-publish` | Existing bucket receiving collector artifacts. |
+| `MINIO_VERIFY_TLS`, `MINIO_CA_BUNDLE` | No | TLS verification controls; verification defaults to enabled. |
 
 ## Modes
 
@@ -185,6 +221,10 @@ from data_collection import CollectionRequest, collect
 
 result = collect(CollectionRequest(...))
 ```
+
+`CollectionRequest.publish` defaults to `True`. Set it to `False` only for a
+deliberately local integration. The collector package contains its own storage
+client and never imports the forecaster.
 
 The forecaster is independent of this module and consumes the published
 collection contract through a run directory or shared storage.

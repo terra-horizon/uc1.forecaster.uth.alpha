@@ -104,6 +104,7 @@ def request(tmp_path, **overrides):
         "history_start": "2026-01-01",
         "target_date": "2026-01-06",
         "discovery_chunk_days": 31,
+        "publish": False,
     }
     values.update(overrides)
     return CollectionRequest(**values)
@@ -301,3 +302,88 @@ def test_collector_collects_every_tile_without_water_screening(tmp_path):
     assert all(record["water_check_status"] == "not_performed" for record in history)
     assert not (Path(result.run_dir) / "water").exists()
     assert "waterMask" not in sentinel2_statistics_all_pixels
+
+
+class FakeCollectorStorage:
+    def __init__(self):
+        self.uploads = {}
+        self.observations = []
+        self.tiles = []
+        self.collection_state = None
+        self.runs = []
+        self.closed = False
+
+    def initialize(self):
+        pass
+
+    def ensure_aoi_definition(self, definition):
+        self.definition = definition
+        return {"key": self.aoi_key(relative_path="definition.json")}
+
+    def load_observations(self):
+        return []
+
+    def download_json(self, *, key):
+        return None
+
+    def aoi_key(self, *, relative_path):
+        return f"terra-uc1/test/aoi/{relative_path}"
+
+    def data_key(self, *, relative_path):
+        return f"terra-uc1/test/{relative_path}"
+
+    def run_key(self, *, run_id, relative_path):
+        return f"terra-uc1/test/runs/{run_id}/{relative_path}"
+
+    def upload_file_if_changed(self, path, *, key, content_type):
+        self.uploads[key] = Path(path).read_text()
+        return {"key": key, "content_type": content_type}
+
+    def upload_json_if_changed(self, value, *, key):
+        self.uploads[key] = value
+        return {"key": key, "content_type": "application/json"}
+
+    def upload_json_file(self, path, *, key):
+        self.uploads[key] = json.loads(Path(path).read_text())
+        return {"key": key, "content_type": "application/json"}
+
+    def upload_file(self, path, *, key, content_type):
+        self.uploads[key] = Path(path).read_text()
+        return {"key": key, "content_type": content_type}
+
+    def upsert_observations(self, records, *, run_id):
+        self.observations.extend(records)
+
+    def upsert_tiles(self, records, *, run_id):
+        self.tiles.extend(records)
+
+    def upsert_collection_state(self, state, *, run_id):
+        self.collection_state = state
+
+    def record_run(self, payload, *, run_id):
+        self.runs.append({**payload, "run_id": run_id})
+
+    def close(self):
+        self.closed = True
+
+
+def test_collector_publishes_its_contract_and_run_lifecycle(tmp_path):
+    storage = FakeCollectorStorage()
+    collector = CollectionService(
+        discovery_factory=lambda _cloud: FakeDiscovery(DATES),
+        statistics_factory=FakeStatistics,
+        tile_extractor_factory=FakeTileExtractor,
+        storage=storage,
+    )
+
+    result = collector.collect(request(tmp_path, aoi_id="test", publish=True))
+
+    assert result.status == "success"
+    assert len(storage.observations) == 2
+    assert len(storage.tiles) == 1
+    assert storage.collection_state["last_checked_date"] == "2026-01-06"
+    assert [run["status"] for run in storage.runs] == ["running", "success"]
+    assert all(run["run_id"].startswith("collector-run-") for run in storage.runs)
+    assert "terra-uc1/test/observations/2026-01-01.json" in storage.uploads
+    assert any(key.endswith("collection/collection_run_result.json") for key in storage.uploads)
+    assert storage.closed is True

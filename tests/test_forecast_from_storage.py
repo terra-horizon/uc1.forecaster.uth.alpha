@@ -12,7 +12,9 @@ class FakeStorage:
         self.records = records
         self.uploads = {}
         self.forecasts = []
+        self.features = []
         self.runs = []
+        self.closed = False
 
     def initialize(self):
         return None
@@ -42,14 +44,17 @@ class FakeStorage:
         self.uploads[key] = value
         return {"key": key}
 
-    def upsert_features(self, *args, **kwargs):
-        raise AssertionError("Stored forecast must not publish collector preprocessing artifacts.")
+    def upsert_features(self, rows, *, run_id):
+        self.features.extend(rows)
 
     def upsert_forecasts(self, rows, *, run_id):
         self.forecasts.extend(rows)
 
     def record_run(self, payload, *, run_id):
-        self.runs.append(payload)
+        self.runs.append({**payload, "run_id": run_id})
+
+    def close(self):
+        self.closed = True
 
 
 def observations():
@@ -78,6 +83,10 @@ def test_forecast_from_storage_uses_only_published_aoi_data(tmp_path, monkeypatc
     assert result["forecast_anchor"] == "2026-01-24"
     assert result["forecast_row_count"] == 1
     assert storage.forecasts[0]["tile_id"] == "tile_0"
+    assert storage.features[0]["tile_id"] == "tile_0"
+    assert [run["status"] for run in storage.runs] == ["running", "success"]
+    assert storage.closed is True
+    assert "terra-uc1/partner-aoi/preprocessed/features/tile_0.json" in storage.uploads
     assert (Path(tmp_path) / "external_ingestion" / "forecast_run_result.json").exists()
 
 
@@ -119,3 +128,17 @@ def test_forecast_from_completed_collector_run_can_stay_local(tmp_path, monkeypa
     ).execute()
     assert result["forecast_anchor"] == "2026-01-24"
     assert (tmp_path / "local_handoff" / "forecasts" / "global_forecasts.json").exists()
+
+
+def test_forecast_records_failed_run(tmp_path):
+    storage = FakeStorage([])
+
+    import pytest
+    with pytest.raises(ValueError, match="No usable collected observations"):
+        StoredForecastPipeline(
+            StoredForecastConfig(aoi_id="partner-aoi", run_name="failure", output_root=tmp_path),
+            storage=storage,
+        ).execute()
+
+    assert [run["status"] for run in storage.runs] == ["running", "failed"]
+    assert storage.closed is True

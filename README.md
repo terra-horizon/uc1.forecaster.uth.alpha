@@ -72,9 +72,12 @@ collector service  ->  MongoDB / MinIO or collection-run directory  ->  forecast
 ```
 
 - The collector owns Sentinel discovery, tile extraction, and observation
-  publication.
+  publication. It writes `collection_state`, `tiles`, `observations`, and its
+  `pipeline_runs` lifecycle to MongoDB, with matching JSON/GeoJSON/run
+  artifacts in MinIO.
 - `forecaster.from_storage` is the operational forecaster. It reads the
-  collector's AOI-scoped data and produces forecasts without CDSE access.
+  collector's AOI-scoped data and publishes `preprocessed_features`,
+  `forecasts`, and its own `pipeline_runs` lifecycle without CDSE access.
 
 The operational flow is:
 
@@ -88,11 +91,19 @@ The operational flow is:
 
 The collector and forecaster exchange a stable AOI, tile, and observation
 contract. The forecaster selects tiles with enough usable collected history and
-persists its own forecast artifacts to MongoDB and MinIO.
+persists its own preprocessing and forecast artifacts to MongoDB and MinIO.
 
 ### Forecast from collector data
 
-This is optional and does not replace the scheduled pipeline in deployment:
+The normal deployed forecaster reads the collector-published shared storage:
+
+```bash
+python -m forecaster.from_storage \
+  --aoi-id sperchios \
+  --run-name "sperchios_forecast"
+```
+
+For explicit local/offline verification only:
 
 ```bash
 python -m forecaster.from_storage \
@@ -200,88 +211,62 @@ The image runs as a non-root user and uses `forecaster.from_storage` as
 its entrypoint. It writes queryable records to MongoDB and JSON/GeoJSON/STAC
 artifacts to MinIO.
 
-### Run the storage-backed forecaster in Docker
+### Orchestrating the Decoupled Pipeline (Collector & Forecaster)
 
-Pass the AOI published by the collector:
+The pipeline is intentionally decoupled into two separate tasks: Data Collection and Forecasting. An external orchestrator (like cron or Airflow) should run these sequentially. 
+
+**Step 1: Data Collection (from the `collector/` directory)**
+First, the orchestrator triggers the collector to backfill or fetch new daily data. It passes the bounding box and stable AOI ID:
 
 ```bash
-docker compose --env-file .env run --rm forecaster \
+cd collector
+docker-compose run --rm collector run \
   --aoi-id sperchios \
-  --run-name sperchios-forecast
-```
-
-The forecaster reads collected data from the configured UTH MongoDB/MinIO
-storage and persists forecast results there.
-
-### Backfill and incremental runs
-
-The scheduled CLI defaults to `--history-start 2016-01-01` and uses today as
-the target date when `--target-date` is omitted. A full historical backfill
-requires `--backfill-all`, which processes the interval in discovery chunks:
-
-```bash
-docker compose --env-file .env run --rm forecaster \
   --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --run-name uc1-dev \
+  --run-name sperchios \
+  --output-root outputs \
   --history-start 2016-01-01 \
-  --backfill-all
+  --mode auto
 ```
 
-For another deployment, use the same image and its own `.env`, with a stable
-run label such as `uc1-prod`.
-
-### Daily scheduling
-
-The container is intentionally one-shot. Schedule the same Compose command
-externally, for example with cron, after the historical backfill has completed:
-
-```cron
-15 2 * * * cd /path/to/uc1 && docker compose --env-file /secure/path/uc1.env run --rm forecaster --bbox 22.433493 38.837552 22.569555 38.894223 --run-name uc1-prod --output-root /app/data/inference_runs >> /var/log/uc1-forecast.log 2>&1
-```
-
-Each scheduled invocation restores the AOI state, checks MongoDB for existing
-tile/date records, collects only missing or retryable units, and updates
-MongoDB and MinIO idempotently.
-
-After the backfill, a normal invocation performs an incremental update. It
-checks existing MongoDB observations and collects only missing or retryable
-tile/date units:
+**Step 2: Forecasting (from the repository root)**
+Once collection succeeds, the orchestrator runs the independent forecaster. The forecaster strictly acts as a consumer: it does **not** attempt to collect data, and it automatically looks up the bounding box from the database using the `--aoi-id`.
 
 ```bash
-docker compose --env-file .env run --rm forecaster \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --run-name uc1-dev
+cd ..
+docker-compose --env-file .env run --rm --entrypoint "python -m forecaster.from_storage" forecaster \
+  --aoi-id sperchios \
+  --run-name sperchios-forecast \
+  --history-start 2016-01-01
 ```
 
-Use a bounded commissioning run:
+If the database is missing data or the collector failed, the forecaster will exit cleanly with an error (e.g., `ValueError: AOI has observations, but no tile has the 24 usable input records required by the model.`) so the orchestrator can handle the failure. 
+
+**Simulating Past Dates**
+By default, the forecaster anchors its predictions to the absolute newest date it finds in the database. To force the forecaster to simulate a past date as "today" (ignoring any collected data newer than that date), pass the `--as-of-date` flag:
 
 ```bash
-docker compose --env-file .env run --rm forecaster \
-  --bbox 22.433493 38.837552 22.569555 38.894223 \
-  --run-name uc1-dev \
-  --history-start 2026-06-05 \
-  --target-date 2026-06-30 \
-  --max-days-per-run 1 \
-  --max-tiles-per-run 1 \
-  --skip-inference
+docker-compose --env-file .env run --rm --entrypoint "python -m forecaster.from_storage" forecaster \
+  --aoi-id sperchios \
+  --run-name sperchios-forecast \
+  --as-of-date 2026-07-15
 ```
 
-### Scheduled CLI parameters
+### Forecaster CLI Parameters
+
+The independent forecaster (`forecaster.from_storage`) accepts the following parameters:
 
 | Parameter | Description |
 | --- | --- |
-| `--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` | Required AOI bounding box. |
-| `--run-name NAME` | Required stable run label, for example `uc1-dev` or `uc1-prod`. |
-| `--output-root PATH` | Local staging root mounted into the container. |
-| `--history-start YYYY-MM-DD` | Start date for discovery; defaults to `2016-01-01`. |
-| `--target-date YYYY-MM-DD` | End/target date; defaults to today. |
-| `--backfill-all` | Process all discovery windows from the history start to the target date. |
-| `--discovery-chunk-days N` | Size of each discovery window; defaults to `31`. |
-| `--max-days-per-run N` | Limit missing dates processed in one invocation. |
-| `--max-tiles-per-run N` | Limit tiles processed in one invocation. |
-| `--dry-run` | Discover and report missing dates without collecting or writing data products. |
-| `--skip-inference` | Collect/update data without running the forecast model. |
-| `--stac-base-url URL` | Optional base URL used in exported STAC links. |
+| `--aoi-id ID` | Required. Stable AOI ID used by the collector when publishing data. Used to retrieve the bounding box and dataset from the DB. |
+| `--run-name NAME` | Required. Name for this forecast-only run (e.g. `sperchios-forecast`). |
+| `--output-root PATH` | Local staging root mounted into the container (defaults to `outputs/forecasts`). |
+| `--history-start YYYY-MM-DD` | Optional. Earliest ISO observation date to retrieve from the database. |
+| `--as-of-date YYYY-MM-DD` | Optional. Force the model to simulate a past date as "today" by only using observations on or before this date. |
+| `--collection-run-dir PATH` | Optional. Read a completed standalone collector run directly from local files instead of shared storage. |
+| `--no-publish` | Optional. Keep forecast outputs local and do not require storage credentials (useful with `--collection-run-dir`). |
+| `--plot` | Optional. Generate visualization plots of the forecast trajectories. |
+| `--stac-base-url URL` | Optional. Base URL used in exported STAC links. |
 
 ### Storage layout
 
