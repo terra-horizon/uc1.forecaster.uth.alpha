@@ -102,6 +102,18 @@ class CollectionService:
         history_path = self.run_dir / "history" / "global_history.json"
         if not history_path.exists():
             records = self.storage.load_observations()
+            valid_records = [
+                record
+                for record in records
+                if record.get("tile_id") not in (None, "") and record.get("observation_date") not in (None, "")
+            ]
+            skipped_records = len(records) - len(valid_records)
+            if skipped_records:
+                self._log(
+                    f"Skipping {skipped_records} malformed remote observation record(s) without tile_id or observation_date.",
+                    level="warning",
+                )
+            records = valid_records
             if records:
                 HistoryStore(history_path, self.run_dir / "history" / "global_history.csv").write(records)
 

@@ -543,3 +543,30 @@ def test_collector_publishes_its_contract_and_run_lifecycle(tmp_path):
     assert "terra-uc1/test/observations/2026-01-01.json" in storage.uploads
     assert any(key.endswith("collection/collection_run_result.json") for key in storage.uploads)
     assert storage.closed is True
+
+
+def test_collector_skips_malformed_remote_observations_during_hydration(tmp_path):
+    storage = FakeCollectorStorage()
+    storage.load_observations = lambda: [
+        {"observation_date": "2026-01-01", "created_at": "2026-01-01T00:00:00Z"},
+        {
+            "tile_id": "tile_0",
+            "observation_date": "2026-01-01",
+            "bbox": [22.0, 38.0, 22.01, 38.01],
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            **METRICS,
+        },
+    ]
+    collector = CollectionService(
+        discovery_factory=lambda _cloud: FakeDiscovery(DATES),
+        statistics_factory=FakeStatistics,
+        tile_extractor_factory=FakeTileExtractor,
+        storage=storage,
+    )
+
+    result = collector.collect(request(tmp_path, aoi_id="test", publish=True))
+
+    history = json.loads(Path(result.history_json_path).read_text(encoding="utf-8"))
+    assert all(record.get("tile_id") for record in history)
+    assert "Skipping 1 malformed remote observation" in (Path(result.run_dir) / "logs" / "collector.jsonl").read_text(encoding="utf-8")
