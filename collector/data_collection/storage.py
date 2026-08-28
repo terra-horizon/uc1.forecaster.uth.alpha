@@ -72,8 +72,19 @@ def _atomic_text(path: Path, content: str) -> None:
             os.unlink(temporary)
 
 
+def _json_default(value: Any) -> str:
+    """Serialize BSON-compatible temporal values restored from MongoDB."""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def write_json(path: Path, value: Any) -> None:
-    _atomic_text(path, json.dumps(value, indent=2, allow_nan=False) + "\n")
+    _atomic_text(path, json.dumps(value, indent=2, allow_nan=False, default=_json_default) + "\n")
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -118,7 +129,7 @@ class HistoryStore:
                 for record in records:
                     row = dict(record)
                     for field in ("bbox", "stac_item_ids", "asset_paths", "quality_flags"):
-                        row[field] = json.dumps(row.get(field), allow_nan=False, separators=(",", ":"))
+                        row[field] = json.dumps(row.get(field), allow_nan=False, separators=(",", ":"), default=_json_default)
                     writer.writerow({column: row.get(column) for column in HISTORY_COLUMNS})
                 handle.flush()
                 os.fsync(handle.fileno())

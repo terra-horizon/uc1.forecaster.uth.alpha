@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -10,11 +11,26 @@ from data_collection.collectors.sentinel3 import Sentinel3Collection
 from data_collection.evalscripts import sentinel2_statistics_all_pixels
 from data_collection.models import CollectionRequest
 from data_collection.service import CollectionService
+from data_collection.storage import HistoryStore
 from data_collection.validation import validate_run
 
 
 DATES = ["2026-01-01", "2026-01-06"]
 METRICS = {"CDOM": 1.0, "Chl_a": 2.0, "Color": 3.0, "Cya": 4.0, "DOC": 5.0, "Turb": 6.0, "WQI": 7.0}
+
+
+def test_history_store_serializes_mongodb_datetimes(tmp_path):
+    history_path = tmp_path / "history" / "global_history.json"
+    HistoryStore(history_path, tmp_path / "history" / "global_history.csv").write([{
+        "tile_id": "tile_0",
+        "observation_date": "2026-01-01",
+        "created_at": datetime(2026, 1, 1, 12, 30, tzinfo=timezone.utc),
+        "updated_at": datetime(2026, 1, 1, 12, 31),
+    }])
+
+    records = json.loads(history_path.read_text(encoding="utf-8"))
+    assert records[0]["created_at"] == "2026-01-01T12:30:00Z"
+    assert records[0]["updated_at"] == "2026-01-01T12:31:00Z"
 
 
 class FakeDiscovery:
