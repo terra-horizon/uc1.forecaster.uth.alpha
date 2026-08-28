@@ -6,7 +6,7 @@ import math
 import csv
 import io
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 import pandas as pd
 from .. import credentials as CDSE_Credentials
@@ -53,7 +53,7 @@ class StatisticalCollection:
         self.credential_index = 0
         self.client_id = self.credential_sets[0]["client_id"]
         self.client_secret = self.credential_sets[0]["client_secret"]
-        self.api_url = "https://sh.dataspace.copernicus.eu/api/v1/statistics"
+        self.api_url = "https://sh.dataspace.copernicus.eu/statistics/v1"
         self.access_token = self.get_access_token()
         self.bbox = bbox
         self.dir = dir
@@ -176,6 +176,10 @@ class StatisticalCollection:
             print("No access token available. Cannot proceed.")
             return None
 
+        end_exclusive = (
+            date.fromisoformat(time_interval[1][:10]) + timedelta(days=1)
+        ).isoformat()
+
         payload = {
             "input": {
                 "bounds": {
@@ -186,7 +190,7 @@ class StatisticalCollection:
                     "dataFilter": {
                         "timeRange": {
                             "from": f"{time_interval[0]}T00:00:00Z",  #  FIXED TIME FORMAT
-                            "to": f"{time_interval[1]}T23:59:59Z"
+                            "to": f"{end_exclusive}T00:00:00Z"
                         },
                         "maxCloudCoverage": self.max_cloud_coverage,
                     },
@@ -195,7 +199,7 @@ class StatisticalCollection:
             "aggregation": {
                 "timeRange": {
                     "from": f"{time_interval[0]}T00:00:00Z",
-                    "to": f"{time_interval[1]}T23:59:59Z"
+                    "to": f"{end_exclusive}T00:00:00Z"
                 },
                 "aggregationInterval": {"of": "P1D"},
                 "evalscript": evalscript
@@ -247,6 +251,18 @@ class StatisticalCollection:
                 return response
 
             print(f"API Response: {response.status_code}")
+            request_id = (
+                response.headers.get("x-request-id")
+                or response.headers.get("x-correlation-id")
+                or response.headers.get("traceparent")
+            )
+            retry_after = response.headers.get("Retry-After")
+            body = (response.text or "").strip()
+            print(
+                "[Statistics] CDSE error response: "
+                f"status={response.status_code}; request_id={request_id or 'not-provided'}; "
+                f"retry_after={retry_after or 'not-provided'}; body={body[:4000] or '<empty>'}"
+            )
             return response
 
     def save_data(self):

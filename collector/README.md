@@ -76,6 +76,27 @@ docker-compose run --rm collector run \
   --mode auto
 ```
 
+### UTH server network
+
+On the UTH server, MongoDB and MinIO are private Docker services on the
+existing `terra-network`. Use the UTH Compose overlay so the collector can
+resolve `terra-mongodb` and `terra-minio`; do not use a laptop SSH-tunnel URI
+such as `host.docker.internal:37017` there.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.uth.yml run --rm collector run \
+  --aoi-id sperchios \
+  --bbox 22.433493 38.837552 22.569555 38.894223 \
+  --run-name sperchios \
+  --output-root outputs \
+  --history-start 2016-01-01 \
+  --mode auto
+```
+
+The server-only `.env` must use Docker-service endpoints, for example
+`MONGO_URI=mongodb://...@terra-mongodb:27017/...` and
+`MINIO_ENDPOINT=http://terra-minio:9000`. Keep `.env` untracked.
+
 Or using the local python launcher directly:
 
 ```bash

@@ -31,3 +31,4 @@ forecaster/models/default_model/evaluations/
 # Examples and Tests
 terra-minio-example.py
 test_mongo_db.py
+terra-mongo-example.py

@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from data_collection.collectors.sentinel2 import StatisticalCollection
+from data_collection.collectors.sentinel3 import Sentinel3Collection
 from data_collection.evalscripts import sentinel2_statistics_all_pixels
 from data_collection.models import CollectionRequest
 from data_collection.service import CollectionService
@@ -250,6 +251,145 @@ def test_statistics_tries_every_credential_before_exhausting_retries(monkeypatch
 
     assert response.status_code == 200
     assert collector.credential_index == 4
+
+
+def test_statistics_uses_next_midnight_for_daily_aggregation(monkeypatch):
+    class Response:
+        status_code = 200
+
+    payloads = []
+
+    def post(*_args, **kwargs):
+        payloads.append(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("data_collection.collectors.sentinel2.requests.post", post)
+    collector = StatisticalCollection.__new__(StatisticalCollection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "token"
+    collector.max_cloud_coverage = 30
+
+    response = collector.get_request("//VERSION=3", ("2026-07-01", "2026-07-01"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 200
+    payload = payloads[0]
+    assert payload["input"]["data"][0]["dataFilter"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-02T00:00:00Z",
+    }
+    assert payload["aggregation"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-02T00:00:00Z",
+    }
+
+
+def test_statistics_uses_day_after_interval_end_for_multi_day_aggregation(monkeypatch):
+    class Response:
+        status_code = 200
+
+    payloads = []
+
+    def post(*_args, **kwargs):
+        payloads.append(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("data_collection.collectors.sentinel2.requests.post", post)
+    collector = StatisticalCollection.__new__(StatisticalCollection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "token"
+    collector.max_cloud_coverage = 30
+
+    response = collector.get_request("//VERSION=3", ("2026-07-01", "2026-07-13"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 200
+    payload = payloads[0]
+    assert payload["input"]["data"][0]["dataFilter"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-14T00:00:00Z",
+    }
+    assert payload["aggregation"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-14T00:00:00Z",
+    }
+
+
+def test_statistics_prints_cdse_500_response_body(monkeypatch, capsys):
+    class Response:
+        status_code = 500
+        headers = {"x-request-id": "cdse-request-123"}
+        text = '{"error":{"message":"internal processing failure"}}'
+
+    monkeypatch.setattr("data_collection.collectors.sentinel2.requests.post", lambda *_args, **_kwargs: Response())
+    collector = StatisticalCollection.__new__(StatisticalCollection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "token"
+    collector.max_cloud_coverage = 30
+
+    response = collector.get_request("//VERSION=3", ("2026-07-01", "2026-07-01"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 500
+    output = capsys.readouterr().out
+    assert "status=500" in output
+    assert "request_id=cdse-request-123" in output
+    assert 'body={"error":{"message":"internal processing failure"}}' in output
+
+
+def test_sentinel3_statistics_uses_next_midnight_for_daily_aggregation(monkeypatch):
+    class Response:
+        status_code = 200
+
+    payloads = []
+
+    def post(*_args, **kwargs):
+        payloads.append(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("data_collection.collectors.sentinel3.requests.post", post)
+    collector = Sentinel3Collection.__new__(Sentinel3Collection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "token"
+
+    response = collector.get_request("//VERSION=3", ("2026-07-01", "2026-07-01"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 200
+    payload = payloads[0]
+    assert payload["input"]["data"][0]["dataFilter"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-02T00:00:00Z",
+    }
+    assert payload["aggregation"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-02T00:00:00Z",
+    }
+
+
+def test_sentinel3_statistics_uses_day_after_interval_end_for_multi_day_aggregation(monkeypatch):
+    class Response:
+        status_code = 200
+
+    payloads = []
+
+    def post(*_args, **kwargs):
+        payloads.append(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("data_collection.collectors.sentinel3.requests.post", post)
+    collector = Sentinel3Collection.__new__(Sentinel3Collection)
+    collector.api_url = "https://example.test/statistics"
+    collector.access_token = "token"
+
+    response = collector.get_request("//VERSION=3", ("2026-07-01", "2026-07-13"), [22.0, 38.0, 22.1, 38.1])
+
+    assert response.status_code == 200
+    payload = payloads[0]
+    assert payload["input"]["data"][0]["dataFilter"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-14T00:00:00Z",
+    }
+    assert payload["aggregation"]["timeRange"] == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-07-14T00:00:00Z",
+    }
 
 
 def test_retryable_failure_is_not_written_as_no_data_and_resumes(tmp_path):

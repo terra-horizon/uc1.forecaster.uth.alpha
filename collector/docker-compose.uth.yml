@@ -1,0 +1,13 @@
+# UTH server overlay.  It gives the standalone collector access to the
+# existing MongoDB and MinIO services without exposing either service publicly.
+# Apply it only on the UTH host, where `terra-network` is already managed by
+# the infrastructure Compose project.
+services:
+  collector:
+    networks:
+      - terra-network
+
+networks:
+  terra-network:
+    external: true
+    name: terra-network
