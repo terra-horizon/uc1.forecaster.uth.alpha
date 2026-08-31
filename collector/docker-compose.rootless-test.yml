@@ -1,4 +1,16 @@
 services:
+  collector-output-init:
+    # Rootless container root is mapped to the terra Unix account, not host
+    # root. Initialize the new named volume for the image's non-root user.
+    image: terra-uc1-collector:local
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      mkdir -p /app/outputs
+      chown -R 1000:1000 /app/outputs
+    volumes:
+      - terra-rootless-collector-output:/app/outputs
+
   collector:
     # The inherited host bind mount targets an iprism-owned directory. A
     # rootless container's non-root user maps to a subordinate host UID, so
