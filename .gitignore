@@ -22,6 +22,11 @@ tmp/
 docs/docs/alpha-uc1-data-schema-high-lvl.md
 docs/docs/alpha-uc1-data-schemas.md
 
+# Local rootless-Docker/Portainer preparation notes (not deployment docs).
+docs/docs/portainer-rootless-docker-setup.md
+docs/docs/rootless-docker-operations.md
+docs/docs/server-rootless-docker-migration.md
+
 # STAC Catalog schemas
 /stac-water-pollution-md/
 
