@@ -1,13 +1,37 @@
-# UTH server overlay.  It gives the standalone collector access to the
-# existing MongoDB and MinIO services without exposing either service publicly.
-# Apply it only on the UTH host, where `terra-network` is already managed by
-# the infrastructure Compose project.
+# UTH server production overlay.
+#
+# Apply with docker-compose.yml on Terra's per-user Docker daemon. The
+# data-layer provides the standard terra-network, terra-minio and
+# terra-mongodb names without exposing MongoDB or MinIO publicly.
 services:
+  collector-output-init:
+    image: terra-uc1-collector:local
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /app/outputs
+        chown -R 1000:1000 /app/outputs
+    volumes:
+      - terra-collector-output:/app/outputs
+
   collector:
+    depends_on:
+      collector-output-init:
+        condition: service_completed_successfully
+    volumes:
+      - terra-collector-output:/app/outputs
     networks:
       - terra-network
+    environment:
+      MINIO_ENDPOINT: http://terra-minio:9000
+      MINIO_VERIFY_TLS: "false"
 
 networks:
   terra-network:
     external: true
     name: terra-network
+
+volumes:
+  terra-collector-output:
