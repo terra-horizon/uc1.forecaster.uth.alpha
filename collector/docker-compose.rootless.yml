@@ -1,0 +1,38 @@
+# Permanent overlay for the Terra rootless Docker daemon.
+#
+# Use with the base file only on the Terra host:
+#   docker compose -f docker-compose.yml -f docker-compose.rootless.yml ...
+# The data-layer Compose project provides this external network and exposes the
+# stable service names terra-mongodb and terra-minio inside it.
+services:
+  collector-output-init:
+    image: terra-uc1-collector:local
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /app/outputs
+        chown -R 1000:1000 /app/outputs
+    volumes:
+      - terra-rootless-collector-output:/app/outputs
+
+  collector:
+    depends_on:
+      collector-output-init:
+        condition: service_completed_successfully
+    volumes:
+      - terra-rootless-collector-output:/app/outputs
+    networks:
+      - terra-rootless
+    environment:
+      MINIO_ENDPOINT: http://terra-minio:9000
+      MINIO_VERIFY_TLS: "false"
+
+networks:
+  terra-rootless:
+    external: true
+    name: terra-rootless-network
+
+volumes:
+  terra-rootless-collector-output:
