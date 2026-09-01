@@ -1,0 +1,17 @@
+# UTH server production overlay.
+#
+# Apply with docker-compose.yml on Terra's per-user Docker daemon. The
+# rootless implementation detail is intentionally not encoded in service or
+# network names: the data-layer provides the standard Terra service names.
+services:
+  forecaster:
+    networks:
+      - terra-network
+    environment:
+      MINIO_ENDPOINT: http://terra-minio:9000
+      MINIO_VERIFY_TLS: "false"
+
+networks:
+  terra-network:
+    external: true
+    name: terra-network

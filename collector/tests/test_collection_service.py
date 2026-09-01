@@ -329,6 +329,35 @@ def test_statistics_uses_day_after_interval_end_for_multi_day_aggregation(monkey
     }
 
 
+def test_statistics_returns_null_wqi_when_combined_denominator_is_zero():
+    collector = StatisticalCollection.__new__(StatisticalCollection)
+    statistic_names = ("min", "max", "mean", "stDev")
+
+    def band(value):
+        return {"stats": {name: value for name in statistic_names}}
+
+    payload = {
+        "data": [{
+            "interval": {"from": "2026-07-01T00:00:00Z"},
+            "outputs": {"data": {"bands": {
+                "B0": band(2.0),
+                "B1": band(1.0),
+                "B2": band(4.0),
+                "B3": band(1.0),
+                "B4": band(1.0),
+            }}},
+        }],
+    }
+
+    values = collector.compute_values(payload)
+
+    assert len(values) == 1
+    for statistic in ("min", "max", "mean", "stDev"):
+        entry = values[0]["01-07-2026"][statistic]
+        assert entry["WQI"] is None
+        assert entry["Chl_a"] > 0
+
+
 def test_statistics_prints_cdse_500_response_body(monkeypatch, capsys):
     class Response:
         status_code = 500

@@ -380,7 +380,11 @@ class StatisticalCollection:
                     # Color Index (Color) in mg.Pt/l TCU
                     Color = 25366 * math.exp(-4.53 * B03 / B04)
 
-                    WQI = ((B02+(B01-B03))-B05)/((B02+(B01-B03))+B05)
+                    wqi_numerator = (B02 + (B01 - B03)) - B05
+                    wqi_denominator = (B02 + (B01 - B03)) + B05
+                    WQI = None if not math.isfinite(wqi_denominator) or math.isclose(
+                        wqi_denominator, 0.0, abs_tol=1e-12
+                    ) else wqi_numerator / wqi_denominator
                     entry = {
                         "Chl_a": Chl_a,
                         "Cya": Cya,

@@ -1,0 +1,15 @@
+services:
+  forecaster:
+    networks:
+      - terra-rootless
+    environment:
+      # Pre-proxy-cutover integration tests must target Terra's rootless
+      # MinIO service directly, not the public endpoint still served by the
+      # rootful proxy.
+      MINIO_ENDPOINT: http://terra-minio:9000
+      MINIO_VERIFY_TLS: "false"
+
+networks:
+  terra-rootless:
+    external: true
+    name: terra-rootless-network
