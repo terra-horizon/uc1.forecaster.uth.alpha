@@ -5,6 +5,8 @@
 # network names: the data-layer provides the standard Terra service names.
 services:
   forecaster:
+    labels:
+      io.portainer.accesscontrol.teams: terra-team
     networks:
       - terra-network
     environment:

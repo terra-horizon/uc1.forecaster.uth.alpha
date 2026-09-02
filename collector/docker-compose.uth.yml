@@ -7,6 +7,8 @@ services:
   collector-output-init:
     image: terra-uc1-collector:local
     user: "0:0"
+    labels:
+      io.portainer.accesscontrol.teams: terra-team
     entrypoint:
       - /bin/sh
       - -ec
@@ -17,6 +19,8 @@ services:
       - terra-collector-output:/app/outputs
 
   collector:
+    labels:
+      io.portainer.accesscontrol.teams: terra-team
     depends_on:
       collector-output-init:
         condition: service_completed_successfully
@@ -35,3 +39,5 @@ networks:
 
 volumes:
   terra-collector-output:
+    labels:
+      io.portainer.accesscontrol.teams: terra-team
