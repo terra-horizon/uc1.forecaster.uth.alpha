@@ -549,17 +549,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url-and-interactive-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Base URL and interactive documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -753,6 +742,17 @@
     <span class="md-ellipsis">
       
         Docker configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-deployment-and-interactive-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local deployment and interactive documentation
       
     </span>
   </a>
@@ -994,17 +994,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url-and-interactive-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Base URL and interactive documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1204,6 +1193,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#local-deployment-and-interactive-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local deployment and interactive documentation
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1280,20 +1280,6 @@ model inference.</p>
 <p>The API is packaged in the <code>forecaster-api</code> Docker service and can be deployed
 on any infrastructure that provides the required MongoDB and S3-compatible
 object storage configuration.</p>
-<h2 id="base-url-and-interactive-documentation">Base URL and interactive documentation<a class="headerlink" href="#base-url-and-interactive-documentation" title="Permanent link">&para;</a></h2>
-<p>The examples below use a direct local deployment:</p>
-<div class="highlight"><pre><span></span><code>http://127.0.0.1:18001
-</code></pre></div>
-<p>When the service is behind a reverse proxy, prepend the proxy path to every
-endpoint. For example, a proxy may expose the API as
-<code>https://example.org/forecaster/api/forecast/jobs</code>.</p>
-<p>FastAPI also provides interactive OpenAPI documentation:</p>
-<div class="highlight"><pre><span></span><code>GET /docs
-GET /openapi.json
-</code></pre></div>
-<p>These paths work directly at the API root. If a reverse proxy exposes the API
-under a path prefix, configure the proxy and application root path accordingly
-for the interactive documentation, or expose the API on a dedicated hostname.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>Health endpoints are public. Job endpoints require the HTTP header:</p>
 <div class="highlight"><pre><span></span><code><span class="err">X-API-Key: &lt;FORECAST_API_TOKEN&gt;</span>
@@ -1634,6 +1620,20 @@ curl<span class="w"> </span>--fail<span class="w"> </span>http://127.0.0.1:18001
 </code></pre></div>
 <p>The Compose configuration binds the API to loopback by default. Choose an
 appropriate authenticated TLS reverse proxy when exposing it outside the host.</p>
+<h2 id="local-deployment-and-interactive-documentation">Local deployment and interactive documentation<a class="headerlink" href="#local-deployment-and-interactive-documentation" title="Permanent link">&para;</a></h2>
+<p>The examples above use a direct local deployment:</p>
+<div class="highlight"><pre><span></span><code>http://127.0.0.1:18001
+</code></pre></div>
+<p>When the service is behind a reverse proxy, prepend the proxy path to every
+endpoint. For example, a proxy may expose the API as
+<code>https://example.org/forecaster/api/forecast/jobs</code>.</p>
+<p>FastAPI also provides interactive OpenAPI documentation:</p>
+<div class="highlight"><pre><span></span><code>GET /docs
+GET /openapi.json
+</code></pre></div>
+<p>These paths work directly at the API root. If a reverse proxy exposes the API
+under a path prefix, configure the proxy and application root path accordingly
+for the interactive documentation, or expose the API on a dedicated hostname.</p>
 
 
 
