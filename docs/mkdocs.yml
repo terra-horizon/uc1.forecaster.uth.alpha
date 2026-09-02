@@ -13,6 +13,7 @@ nav:
   - Setup & Monitoring:
     - Deployment: deployment.md
     - Configuration: configuration.md
+    - Forecaster API: api.md
   - Material:
     - Quality Assurance: qa.md
     - Pipeline Test Scenarios: pipeline-test-scenarios.md

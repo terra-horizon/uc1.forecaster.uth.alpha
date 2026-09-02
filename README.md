@@ -213,6 +213,10 @@ are intentionally not exposed by the API.
 The port is bound to loopback only. Reverse-proxy exposure is a separate
 server deployment step and must retain `X-API-Key` authentication.
 
+See the infrastructure-neutral [Forecaster API reference](docs/docs/api.md)
+for the complete endpoint, request, response, error, idempotency, and Docker
+configuration contract.
+
 ### Storage configuration
 
 The container only needs application-level environment variables. It does not
