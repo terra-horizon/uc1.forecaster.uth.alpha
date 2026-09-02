@@ -41,6 +41,7 @@ services:
   # Permanent HTTP API. Keep the CLI-oriented forecaster service above for
   # one-off operator commands and recovery work.
   forecaster-api:
+    container_name: terra-uc1-forecaster
     build:
       context: .
     image: ${UC1_IMAGE_NAME:-uc1-forecaster:local}
