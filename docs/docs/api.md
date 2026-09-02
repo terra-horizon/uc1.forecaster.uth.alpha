@@ -9,29 +9,6 @@ The API is packaged in the `forecaster-api` Docker service and can be deployed
 on any infrastructure that provides the required MongoDB and S3-compatible
 object storage configuration.
 
-## Base URL and interactive documentation
-
-The examples below use a direct local deployment:
-
-```text
-http://127.0.0.1:18001
-```
-
-When the service is behind a reverse proxy, prepend the proxy path to every
-endpoint. For example, a proxy may expose the API as
-`https://example.org/forecaster/api/forecast/jobs`.
-
-FastAPI also provides interactive OpenAPI documentation:
-
-```text
-GET /docs
-GET /openapi.json
-```
-
-These paths work directly at the API root. If a reverse proxy exposes the API
-under a path prefix, configure the proxy and application root path accordingly
-for the interactive documentation, or expose the API on a dedicated hostname.
-
 ## Authentication
 
 Health endpoints are public. Job endpoints require the HTTP header:
@@ -255,3 +232,26 @@ curl --fail http://127.0.0.1:18001/health/ready
 
 The Compose configuration binds the API to loopback by default. Choose an
 appropriate authenticated TLS reverse proxy when exposing it outside the host.
+
+## Local deployment and interactive documentation
+
+The examples above use a direct local deployment:
+
+```text
+http://127.0.0.1:18001
+```
+
+When the service is behind a reverse proxy, prepend the proxy path to every
+endpoint. For example, a proxy may expose the API as
+`https://example.org/forecaster/api/forecast/jobs`.
+
+FastAPI also provides interactive OpenAPI documentation:
+
+```text
+GET /docs
+GET /openapi.json
+```
+
+These paths work directly at the API root. If a reverse proxy exposes the API
+under a path prefix, configure the proxy and application root path accordingly
+for the interactive documentation, or expose the API on a dedicated hostname.
