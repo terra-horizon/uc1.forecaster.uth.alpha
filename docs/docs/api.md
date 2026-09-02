@@ -28,6 +28,10 @@ GET /docs
 GET /openapi.json
 ```
 
+These paths work directly at the API root. If a reverse proxy exposes the API
+under a path prefix, configure the proxy and application root path accordingly
+for the interactive documentation, or expose the API on a dedicated hostname.
+
 ## Authentication
 
 Health endpoints are public. Job endpoints require the HTTP header:
