@@ -80,10 +80,14 @@ services:
   forecaster-api-output-init:
     image: ${UC1_IMAGE_NAME:-uc1-forecaster:local}
     user: "0:0"
-    entrypoint: ["/bin/sh", "-ec"]
-    command: |
-      mkdir -p /app/outputs
-      chown -R 1000:1000 /app/outputs
+    # Compose appends `command` as shell arguments when `entrypoint` is
+    # overridden. Keep the script as the `sh -c` argument itself.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /app/outputs
+        chown -R 1000:1000 /app/outputs
     volumes:
       - forecaster-api-output:/app/outputs
 
