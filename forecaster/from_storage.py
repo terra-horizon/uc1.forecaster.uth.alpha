@@ -37,6 +37,8 @@ class StoredForecastConfig:
     publish: bool = True
     plot: bool = False
     stac_base_url: str | None = None
+    api_job_id: str | None = None
+    api_run_job_id: str | None = None
     model_profile: ModelInferenceProfile = ModelInferenceProfile()
 
 
@@ -105,6 +107,7 @@ class StoredForecastPipeline:
                     "status": "running",
                     "phase": "loading_inputs",
                     "source": "collector_run_directory" if self.config.collection_run_dir else "shared_storage",
+                    **self._api_metadata(),
                 }, run_id=self.execution_id)
             return self._execute()
         except Exception as exc:
@@ -117,6 +120,7 @@ class StoredForecastPipeline:
                         "phase": "forecasting",
                         "error_type": type(exc).__name__,
                         "error": str(exc)[:2000],
+                        **self._api_metadata(),
                     }, run_id=self.execution_id)
                 except Exception:
                     pass
@@ -205,11 +209,23 @@ class StoredForecastPipeline:
             "forecast_tiles": sorted(feature_csvs),
             "stac_item_id": stac_result.item_id,
             "source": "collector_run_directory" if self.config.collection_run_dir else "shared_storage",
+            **self._api_metadata(),
         }
         (self.run_dir / "forecast_run_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         if self.storage is not None and self.config.publish:
             self.storage.record_run(result, run_id=self.execution_id)
         return result
+
+    def _api_metadata(self) -> dict[str, str]:
+        """Attach API provenance without changing the CLI/storage contract."""
+        return {
+            key: value
+            for key, value in {
+                "api_job_id": self.config.api_job_id,
+                "api_run_job_id": self.config.api_run_job_id,
+            }.items()
+            if value
+        }
 
     def _load_local_collection_input(self) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
         """Read one completed standalone collector run without importing it."""

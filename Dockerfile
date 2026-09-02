@@ -22,4 +22,8 @@ RUN useradd --create-home --shell /usr/sbin/nologin terra \
 
 USER terra
 
+# The default remains the one-shot CLI below. docker-compose.yml overrides it
+# for the permanent FastAPI service and exposes this container port there.
+EXPOSE 8000
+
 ENTRYPOINT ["python", "-m", "forecaster.from_storage"]

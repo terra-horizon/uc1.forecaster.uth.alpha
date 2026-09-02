@@ -35,5 +35,37 @@ services:
       MINIO_VERIFY_TLS: ${MINIO_VERIFY_TLS:-true}
       MINIO_CA_BUNDLE: ${MINIO_CA_BUNDLE:-}
     volumes:
-      - ${UC1_OUTPUT_DIR:-./data/inference_runs}:/app/data/inference_runs
+      - ${UC1_OUTPUT_DIR:-./data/inference_runs}:/app/outputs
+    init: true
+
+  # Permanent HTTP API. Keep the CLI-oriented forecaster service above for
+  # one-off operator commands and recovery work.
+  forecaster-api:
+    build:
+      context: .
+    image: ${UC1_IMAGE_NAME:-uc1-forecaster:local}
+    entrypoint: ["python", "-m", "uvicorn"]
+    command: ["forecaster.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FORECAST_API_HOST_PORT:-18001}:8000"
+    environment:
+      TERRA_AOI_ID: ${TERRA_AOI_ID:-}
+      MONGO_URI: ${MONGO_URI:-}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-}
+      MINIO_VERIFY_TLS: ${MINIO_VERIFY_TLS:-true}
+      MINIO_CA_BUNDLE: ${MINIO_CA_BUNDLE:-}
+      FORECAST_API_TOKEN: ${FORECAST_API_TOKEN:-}
+      FORECAST_JOB_LEASE_SECONDS: ${FORECAST_JOB_LEASE_SECONDS:-86400}
+    volumes:
+      - ${UC1_OUTPUT_DIR:-./data/inference_runs}:/app/outputs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     init: true

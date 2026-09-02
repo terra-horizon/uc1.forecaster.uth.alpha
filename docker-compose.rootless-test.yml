@@ -9,6 +9,13 @@ services:
       MINIO_ENDPOINT: http://terra-minio:9000
       MINIO_VERIFY_TLS: "false"
 
+  forecaster-api:
+    networks:
+      - terra-rootless
+    environment:
+      MINIO_ENDPOINT: http://terra-minio:9000
+      MINIO_VERIFY_TLS: "false"
+
 networks:
   terra-rootless:
     external: true

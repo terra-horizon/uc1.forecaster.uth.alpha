@@ -13,3 +13,5 @@ requests==2.32.3
 python-dotenv==1.0.1
 boto3==1.35.99
 pymongo==4.10.1
+fastapi==0.116.1
+uvicorn[standard]==0.35.0

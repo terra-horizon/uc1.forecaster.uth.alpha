@@ -1,3 +1,5 @@
 -r requirements.txt
 jsonschema==4.23.0
 pytest==8.3.4
+httpx==0.28.1
+pytest-asyncio==0.25.3

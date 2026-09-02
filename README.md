@@ -165,6 +165,54 @@ Show the operational CLI help:
 docker compose run --rm forecaster --help
 ```
 
+### Always-on forecaster API
+
+`forecaster-api` is the permanent, storage-backed API service. It accepts a
+forecast job, returns immediately, and runs the existing independent
+forecaster in the background. The caller polls the job status instead of
+holding an HTTP connection until model inference completes.
+
+Set a private `FORECAST_API_TOKEN` in `.env`, then start the service locally:
+
+```bash
+docker compose --env-file .env up --build -d forecaster-api
+curl http://127.0.0.1:18001/health/live
+```
+
+Submit a job with the configured key. The collector must already have
+successfully published the requested AOI to MongoDB/MinIO.
+
+```bash
+curl --request POST http://127.0.0.1:18001/api/forecast/jobs \
+  --header "Content-Type: application/json" \
+  --header "X-API-Key: $FORECAST_API_TOKEN" \
+  --data '{
+    "run_job_id": "forecast-sperchios-20260902-001",
+    "triggered_at": "2026-09-02T10:30:00+03:00",
+    "profile": "stored-forecast",
+    "aoi_id": "sperchios",
+    "run_name": "sperchios-forecast",
+    "history_start": "2016-01-01"
+  }'
+```
+
+The response is `202 Accepted` with a `job_id`. Poll it until `status` is
+`succeeded` or `failed`:
+
+```bash
+curl --header "X-API-Key: $FORECAST_API_TOKEN" \
+  http://127.0.0.1:18001/api/forecast/jobs/<job_id>
+```
+
+`run_job_id` is the caller's idempotency key. Retrying the identical request
+returns the same job; reusing it with different parameters returns `409`.
+Only the server-approved `stored-forecast` profile is accepted. Paths,
+collector-run directories, publishing controls, and arbitrary model arguments
+are intentionally not exposed by the API.
+
+The port is bound to loopback only. Reverse-proxy exposure is a separate
+server deployment step and must retain `X-API-Key` authentication.
+
 ### Storage configuration
 
 The container only needs application-level environment variables. It does not

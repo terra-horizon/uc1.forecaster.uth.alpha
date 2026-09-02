@@ -75,7 +75,10 @@ def test_forecast_from_storage_uses_only_published_aoi_data(tmp_path, monkeypatc
 
     monkeypatch.setattr("forecaster.from_storage.AOIInferencePipeline.run_model_inference", fake_inference)
     result = StoredForecastPipeline(
-        StoredForecastConfig(aoi_id="partner-aoi", run_name="external-ingestion", output_root=tmp_path),
+        StoredForecastConfig(
+            aoi_id="partner-aoi", run_name="external-ingestion", output_root=tmp_path,
+            api_job_id="api-job-1", api_run_job_id="caller-run-1",
+        ),
         storage=storage,
     ).execute()
 
@@ -88,6 +91,8 @@ def test_forecast_from_storage_uses_only_published_aoi_data(tmp_path, monkeypatc
     assert storage.closed is True
     assert "terra-uc1/partner-aoi/preprocessed/features/tile_0.json" in storage.uploads
     assert (Path(tmp_path) / "external_ingestion" / "forecast_run_result.json").exists()
+    assert all(run["api_job_id"] == "api-job-1" for run in storage.runs)
+    assert result["api_run_job_id"] == "caller-run-1"
 
 
 def test_forecast_from_storage_respects_as_of_date(tmp_path, monkeypatch):
