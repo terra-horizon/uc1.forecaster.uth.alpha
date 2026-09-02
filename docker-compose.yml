@@ -61,8 +61,11 @@ services:
       MINIO_CA_BUNDLE: ${MINIO_CA_BUNDLE:-}
       FORECAST_API_TOKEN: ${FORECAST_API_TOKEN:-}
       FORECAST_JOB_LEASE_SECONDS: ${FORECAST_JOB_LEASE_SECONDS:-86400}
+    depends_on:
+      forecaster-api-output-init:
+        condition: service_completed_successfully
     volumes:
-      - ${UC1_OUTPUT_DIR:-./data/inference_runs}:/app/outputs
+      - forecaster-api-output:/app/outputs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
       interval: 30s
@@ -70,3 +73,19 @@ services:
       retries: 3
       start_period: 30s
     init: true
+
+  # The API runs as the non-root image user.  Give it an API-only persistent
+  # output volume and prepare its ownership before the server starts.  Keep
+  # the CLI forecaster's host bind mount unchanged for operator workflows.
+  forecaster-api-output-init:
+    image: ${UC1_IMAGE_NAME:-uc1-forecaster:local}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      mkdir -p /app/outputs
+      chown -R 1000:1000 /app/outputs
+    volumes:
+      - forecaster-api-output:/app/outputs
+
+volumes:
+  forecaster-api-output:
