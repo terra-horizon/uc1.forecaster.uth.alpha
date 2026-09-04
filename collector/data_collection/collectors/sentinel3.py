@@ -99,7 +99,23 @@ class Sentinel3Collection:
                     raise RuntimeError("Sentinel-3 network retries exhausted") from None
                 continue
             if response.status_code == 200:
-                return response
+                try:
+                    body = response.json()
+                    interval_errors = [item.get("error") for item in body.get("data", [])
+                                       if isinstance(item, dict) and item.get("error")]
+                except (ValueError, AttributeError):
+                    interval_errors = []
+                if not interval_errors:
+                    return response
+                # Sentinel Hub can report transient processing failures inside
+                # an otherwise successful HTTP 200 response. Retry the complete
+                # bounded interval so no tile-days are silently skipped.
+                if attempt + 1 < retries:
+                    time.sleep(2 ** attempt)
+                    continue
+                detail = str(interval_errors[0]).replace("\n", " ")[:500]
+                raise RuntimeError(
+                    f"Sentinel-3 interval processing retries exhausted: {detail}")
             if response.status_code == 401:
                 self.access_token = None
             elif response.status_code == 429 or response.status_code >= 500:

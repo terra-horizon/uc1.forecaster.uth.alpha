@@ -182,6 +182,44 @@ def test_401_is_bounded_and_403_is_not_rate_limiting(monkeypatch):
     assert len(calls) == 1
 
 
+def test_http_200_interval_processing_error_is_retried(monkeypatch):
+    client = Sentinel3Collection.__new__(Sentinel3Collection)
+    client.access_token, client.api_url = "token", "https://test.invalid"
+    client.get_access_token = lambda: "token"
+    responses = iter([
+        {"data": [{"error": {"type": "EXECUTION_ERROR", "message": "temporary"}}]},
+        {"data": [{"error": {"type": "EXECUTION_ERROR", "message": "temporary"}}]},
+        payload(),
+    ])
+    calls = []
+    class Response:
+        status_code = 200
+        def __init__(self, body):
+            self.body = body
+        def json(self):
+            return self.body
+    monkeypatch.setattr("data_collection.collectors.sentinel3.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("data_collection.collectors.sentinel3.requests.post",
+                        lambda *a, **kw: calls.append(1) or Response(next(responses)))
+    response = client.get_request("", ("2020-02-28", "2020-02-28"), [22,38,22.01,38.01])
+    assert response.json() == payload()
+    assert len(calls) == 3
+
+
+def test_http_200_interval_processing_error_preserves_provider_detail(monkeypatch):
+    client = Sentinel3Collection.__new__(Sentinel3Collection)
+    client.access_token, client.api_url = "token", "https://test.invalid"
+    client.get_access_token = lambda: "token"
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"data": [{"error": {"type": "EXECUTION_ERROR", "message": "provider detail"}}]}
+    monkeypatch.setattr("data_collection.collectors.sentinel3.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("data_collection.collectors.sentinel3.requests.post", lambda *a, **kw: Response())
+    with pytest.raises(RuntimeError, match="provider detail"):
+        client.get_request("", ("2020-02-28", "2020-02-28"), [22,38,22.01,38.01])
+
+
 def test_storage_namespaces_do_not_collide():
     settings = CollectorStorageSettings("sperchios", "mongodb://localhost/db", "db",
                                        "http://localhost:9000", "test", "test", "test")
