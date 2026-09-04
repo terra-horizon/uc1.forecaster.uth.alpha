@@ -327,3 +327,41 @@ class CollectorStore:
     @staticmethod
     def _without_id(value: dict[str, Any]) -> dict[str, Any]:
         return {key: item for key, item in value.items() if key != "_id"}
+
+
+class Sentinel3Store(CollectorStore):
+    """Reuse AOI geometry while isolating S3 observations and checkpoints."""
+
+    def initialize(self):
+        super().initialize()
+        self.database["sentinel3_observations"].create_index(
+            [("aoi_id", ASCENDING), ("tile_id", ASCENDING), ("observation_date", ASCENDING)],
+            unique=True, name="unique_aoi_id_tile_id_observation_date",
+        )
+        self.database["sentinel3_collection_state"].create_index(
+            [("aoi_id", ASCENDING)], unique=True, name="unique_aoi_id",
+        )
+
+    def load_observations(self):
+        return [self._without_id(row) for row in
+                self.database["sentinel3_observations"].find(
+                    {"aoi_id": self.settings.aoi_id}).sort(
+                    [("tile_id", ASCENDING), ("observation_date", ASCENDING)])]
+
+    def upsert_observations(self, records, *, run_id):
+        self._upsert_many("sentinel3_observations", records,
+                          ("aoi_id", "tile_id", "observation_date"), run_id=run_id)
+
+    def upsert_collection_state(self, state, *, run_id):
+        self._upsert_many("sentinel3_collection_state", [state], ("aoi_id",), run_id=run_id)
+
+    def aoi_key(self, *, relative_path):
+        if relative_path == "collection_state.json":
+            relative_path = "sentinel3/collection_state.json"
+        return super().aoi_key(relative_path=relative_path)
+
+    def data_key(self, *, relative_path):
+        return super().data_key(relative_path="sentinel3/" + relative_path.lstrip("/"))
+
+    def record_run(self, payload, *, run_id):
+        super().record_run({**payload, "sensor": "sentinel3"}, run_id=run_id)

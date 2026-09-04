@@ -12,7 +12,7 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
     try:
         from jsonschema import Draft202012Validator
     except ImportError as exc:
-        return {"valid": False, "errors": [f"Install the test extra to validate schemas: {exc}"]}
+        return {"valid": False, "errors": [f"Install the collector runtime dependencies to validate schemas: {exc}"]}
 
     checks = [
         (run_dir / "history" / "global_history.json", "global-history.schema.json"),
@@ -31,7 +31,12 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
             if not isinstance(value, list):
                 errors.append(f"{data_path}: history must be a JSON array")
             else:
-                schema = json.loads((SCHEMA_ROOT / "history-record.schema.json").read_text(encoding="utf-8"))
+                state_path = run_dir / "collection" / "state.json"
+                state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                record_schema = ("sentinel3-history-record.schema.json"
+                                 if state.get("sensor") == "sentinel3"
+                                 else "history-record.schema.json")
+                schema = json.loads((SCHEMA_ROOT / record_schema).read_text(encoding="utf-8"))
                 for index, record in enumerate(value):
                     for error in Draft202012Validator(schema).iter_errors(record):
                         location = "/".join(str(part) for part in error.absolute_path)

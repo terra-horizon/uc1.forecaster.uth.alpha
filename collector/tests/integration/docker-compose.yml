@@ -1,0 +1,22 @@
+services:
+  mongo:
+    image: mongo:7
+    tmpfs: /data/db
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: validation-user
+      MINIO_ROOT_PASSWORD: validation-password
+    tmpfs: /data
+  verify:
+    image: terra-uc1-collector:local
+    entrypoint: ["python", "/verify.py"]
+    environment:
+      MONGO_URI: mongodb://mongo:27017/collector_s3_validation
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: validation-user
+      MINIO_SECRET_KEY: validation-password
+      MINIO_BUCKET_NAME: s3-validation
+    volumes:
+      - ./verify_sentinel3_storage.py:/verify.py:ro

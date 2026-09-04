@@ -5,6 +5,35 @@ This folder is the standalone collector module for the TERRA UC1 water-quality p
 Run this module independently. It owns collection and publishes its stable
 AOI/tile/observation contract for the separately deployed forecaster.
 
+## Independent Sentinel-3 collection
+
+Sentinel-2 remains the default. Select `--sensor sentinel3` for an independent
+calendar-driven backfill, for example from this directory:
+
+```bash
+python collect.py run --sensor sentinel3 --aoi-id sperchios --run-name sperchios --bbox 22.433493 38.837552 22.569555 38.894223 --history-start 2016-01-01 --target-date 2026-09-04 --mode backfill
+```
+
+For a Mac pilot add `--no-publish --max-days-per-run 3 --max-tiles-per-run 1`.
+Choose the actual cutoff date; future dates are rejected. Every requested
+calendar day is checked against the S3 catalogue, independently of S2.
+Confirmed catalogue absence becomes unavailable. Missing statistics for a
+catalogued scene and HTTP failures remain retryable.
+
+S3 writes beneath `outputs/sperchios/sentinel3/`, with independent history,
+raw responses, per-tile checkpoints and state. Repeating the command resumes
+unfinished units. A limited run returns `partial` (exit 2) until the requested
+tile-days are complete; inspect `pending_unit_count` and `backfill_complete`.
+Validate with `python collect.py validate --run-dir outputs/sperchios/sentinel3`.
+
+The metric `s3_s8_brightness_temperature_c` is the spatial mean of SLSTR L1B
+S8 brightness temperature in a most-recent daily nadir mosaic. Min, max and
+standard deviation are separate statistics. This is not corrected L2 surface
+temperature and no cloud mask is applied. Native thermal resolution is 1000 m;
+sampling smaller river tiles does not isolate river water or add spatial
+detail. Output-grid sample counts are not independent native pixel counts.
+See the [CDSE SLSTR specification](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/S3SLSTR.html).
+
 ## Install
 
 Create an environment and install the package from this folder:
@@ -257,5 +286,19 @@ python3 -m pytest -q
 ```
 
 Live CDSE calls are not part of the default test suite. See
+`tests/integration/docker-compose.yml` for isolated real MongoDB/MinIO testing:
+
+```bash
+docker compose -p terra-s3-validation -f tests/integration/docker-compose.yml up -d mongo minio
+docker compose -p terra-s3-validation -f tests/integration/docker-compose.yml run --rm verify
+docker compose -p terra-s3-validation -f tests/integration/docker-compose.yml down
+```
+
+Build `terra-uc1-collector:local` first. The fixture creates no host ports and
+uses temporary in-memory databases. Teardown removes only this test project's
+containers and test data. The test checks resume, deduplication, hydration,
+raw artifacts, and preservation of existing S2 records and checkpoint.
+
+See
 [`DATA_CONTRACT.md`](DATA_CONTRACT.md) for the collector-to-forecaster and
 storage data model.

@@ -13,7 +13,8 @@ from .validation import validate_run
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="TERRA UC1 standalone data collection pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    run = subparsers.add_parser("run", help="Collect or update Sentinel-2 history")
+    run = subparsers.add_parser("run", help="Collect or update independent Sentinel history")
+    run.add_argument("--sensor", choices=("sentinel2", "sentinel3"), default="sentinel2")
     run.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"))
     run.add_argument("--run-name", required=True)
     run.add_argument("--aoi-id", help="Stable physical AOI identifier; defaults to a normalized run name.")
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = collect(CollectionRequest(
             aoi_bbox=list(args.bbox),
+            sensor=args.sensor,
             run_name=args.run_name,
             aoi_id=args.aoi_id,
             output_root=Path(args.output_root),

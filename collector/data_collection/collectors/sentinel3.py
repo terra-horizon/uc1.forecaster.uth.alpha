@@ -1,399 +1,226 @@
-import requests
-import json
+"""Independent Sentinel-3 SLSTR L1B daily statistics.
+
+S8 measures top-of-atmosphere brightness temperature, not retrieved surface
+temperature. The Statistics API uses a most-recent daily nadir mosaic; its
+spatial statistics are not an average of all daily overpasses.
+"""
+from __future__ import annotations
+
+import math
 import time
-import os
-import csv
-from datetime import date, datetime, timedelta
-from .. import credentials as CDSE_Credentials
+from datetime import date, timedelta
+from pathlib import Path
 
-DATA_DIR = "data"
-RETRY_DELAY_SECONDS = 180  # 3 minutes
+import requests
 
-def _sleep_with_countdown(seconds: int, message: str) -> None:
-    """Colored countdown logger to highlight rate-limit waits."""
-    print(f"\033[93m{message}\033[0m")
-    for remaining in range(seconds, 0, -1):
-        print(
-            f"\r\033[93m[WAIT] Retrying in {remaining:3d}s...\033[0m",
-            end="",
-            flush=True,
-        )
-        time.sleep(1)
-    print()
+from .. import credentials
+from ..storage import write_json
 
-class Sentinel3Collection:
-    def __init__(self, time_interval=None, bbox=[], dir=DATA_DIR):
-        # API Authentication Credentials
-        self.token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-        self.credential_sets = CDSE_Credentials.get_credential_sets()
-        self.credential_index = 0
-        self.client_id = self.credential_sets[0]["client_id"]
-        self.client_secret = self.credential_sets[0]["client_secret"]
-        self.api_url = "https://sh.dataspace.copernicus.eu/statistics/v1"
-        self.access_token = self.get_access_token()
-        self.bbox = bbox
-        self.dir = dir
-
-        # Evalscript
-        self.evalscript = """
+METHOD = "slstr_s8_bt_daily_most_recent_v1"
+METRIC = "s3_s8_brightness_temperature_c"
+EVALSCRIPT = """
 //VERSION=3
 function setup() {
-    return {
-        input: [{ bands: ["S8", "dataMask"] }],
-        output: [
-            { id: "data", bands: 1 },
-            { id: "dataMask", bands: 1 }
-        ]
-    };
+  return {
+    input: [{bands: ["S8", "dataMask"]}],
+    output: [{id: "data", bands: 1, sampleType: "FLOAT32"},
+             {id: "dataMask", bands: 1}],
+    mosaicking: "SIMPLE"
+  };
 }
-
-function evaluatePixel(samples) {
-    // Cloud Masking:
-    // S8 (10.8µm) is the standard thermal band for day/night.
-    // Water is typically ~280-300K.
-    // Clouds are much colder (e.g. < 270K).
-    // Filter out anything below 270K (-3.15 C) to remove cloud tops.
-
-    if (samples.S8 < 270) {
-        return {
-            data: [samples.S8],
-            dataMask: [0] // Mask as invalid
-        };
-    }
-
-    return {
-        data: [samples.S8],
-        dataMask: [samples.dataMask]
-    };
+function evaluatePixel(s) {
+  var valid = s.dataMask && isFinite(s.S8) && s.S8 > 0;
+  return {data: [valid ? s.S8 - 273.15 : 0], dataMask: [valid ? 1 : 0]};
 }
 """
 
-        # Define Time Intervals
-        self.slots = []
 
-        if time_interval:
-            # time_interval is (start_str, end_str) e.g. ("2020-01-01", "2025-12-31")
-            s_str, e_str = time_interval
-            # Parse dates to handle yearly splitting
-            try:
-                # Handle possible ISO format with T/Z by taking just first 10 chars for date
-                s_date = datetime.strptime(s_str[:10], "%Y-%m-%d").date()
-                e_date = datetime.strptime(e_str[:10], "%Y-%m-%d").date()
-
-                for year in range(s_date.year, e_date.year + 1):
-                    # Define year start/end
-                    year_start = date(year, 1, 1)
-                    year_end = date(year, 12, 31)
-
-                    # Clip to actual interval
-                    current_start = max(s_date, year_start)
-                    current_end = min(e_date, year_end)
-
-                    self.slots.append([current_start.isoformat(), current_end.isoformat()])
-            except ValueError as e:
-                print(f"Error parsing time_interval dates: {e}. Falling back to default years.")
-
-        if not self.slots: # Fallback or if time_interval not provided
-            current_year = date.today().year
-            for year in range(current_year - 1, current_year + 1):
-                start = date(year, 1, 1).isoformat()
-                end = date(year, 12, 31).isoformat()
-                self.slots.append([start, end])
-
-    @staticmethod
-    def _redact_client_id(client_id: str) -> str:
-        if len(client_id) <= 10:
-            return "***"
-        return f"{client_id[:8]}...{client_id[-4:]}"
-
-    def _current_credential_label(self):
-        return self.credential_sets[self.credential_index].get("label", "credentials")
-
-    def _switch_to_next_credentials(self, status_code: int) -> bool:
-        if self.credential_index + 1 >= len(self.credential_sets):
-            return False
-        current = self.credential_sets[self.credential_index]
-        self.credential_index += 1
-        next_credentials = self.credential_sets[self.credential_index]
-        self.client_id = next_credentials["client_id"]
-        self.client_secret = next_credentials["client_secret"]
-        self.access_token = self.get_access_token()
-        print(
-            f"[Statistics] Received {status_code} using "
-            f"{current.get('label', 'credentials')} credentials; switching to "
-            f"{next_credentials.get('label', 'credentials')} "
-            f"({self._redact_client_id(self.client_id)})."
-        )
-        return bool(self.access_token)
+class Sentinel3Collection:
+    def __init__(self, time_interval=None, bbox=None, dir="data"):
+        self.time_interval = time_interval
+        self.bbox = list(bbox or [])
+        self.dir = Path(dir)
+        self.token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+        self.api_url = "https://sh.dataspace.copernicus.eu/statistics/v1"
+        self.credential_sets = credentials.get_credential_sets()
+        self.access_token = None
 
     def get_access_token(self):
-        """Retrieve an access token from Copernicus Data Space Ecosystem"""
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret
-        }
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
+        for pair in self.credential_sets:
+            try:
+                response = requests.post(self.token_url, data={
+                    "grant_type": "client_credentials",
+                    "client_id": pair["client_id"],
+                    "client_secret": pair["client_secret"],
+                }, timeout=30)
+                if response.status_code == 200:
+                    token = response.json().get("access_token")
+                    if token:
+                        return token
+            except (requests.RequestException, ValueError):
+                continue
+        raise RuntimeError("Sentinel-3 authentication failed; no usable CDSE credential")
 
-        try:
-            response = requests.post(self.token_url, data=payload, headers=headers, timeout=30)
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to retrieve access token: {e}")
-            return None
-
-        if response.status_code == 200:
-            token_data = response.json()
-            print(f"Access token retrieved successfully with {self._current_credential_label()} credentials ({self._redact_client_id(self.client_id)}).")
-            return token_data["access_token"]
-        else:
-            print(f"Failed to retrieve access token: {response.status_code}")
-            print("Error Message:", response.text)
-            return None
-
-    def get_request(self, evalscript, time_interval, bbox, retries: int = 3):
-        """Send request to Copernicus API and retrieve statistics with retry."""
-        if not self.access_token:
-            print("No access token available. Cannot proceed.")
-            return None
-
-        end_exclusive = (
-            date.fromisoformat(time_interval[1][:10]) + timedelta(days=1)
-        ).isoformat()
-
-        # Build payload for Sentinel-3
+    def get_request(self, evalscript, time_interval, bbox, retries=3):
+        start = date.fromisoformat(time_interval[0])
+        end = date.fromisoformat(time_interval[1]) + timedelta(days=1)
+        if start >= end:
+            raise ValueError("Invalid Sentinel-3 interval")
+        interval = {"from": f"{start}T00:00:00Z", "to": f"{end}T00:00:00Z"}
         payload = {
             "input": {
-                "bounds": {
-                    "bbox": bbox,
-                },
+                "bounds": {"bbox": bbox},
                 "data": [{
                     "type": "sentinel-3-slstr",
-                    "dataFilter": {
-                        "timeRange": {
-                            "from": f"{time_interval[0]}T00:00:00Z",
-                            "to": f"{end_exclusive}T00:00:00Z"
-                        },
-                        "maxCloudCoverage": 100
-                    }
-                }]
+                    "dataFilter": {"timeRange": interval, "view": "NADIR", "mosaickingOrder": "mostRecent"},
+                    "processing": {"upsampling": "NEAREST"},
+                }],
             },
             "aggregation": {
-                "timeRange": {
-                    "from": f"{time_interval[0]}T00:00:00Z",
-                    "to": f"{end_exclusive}T00:00:00Z"
-                },
+                "timeRange": interval,
                 "aggregationInterval": {"of": "P1D"},
-                "evalscript": evalscript
+                "evalscript": evalscript,
+                # Explicit WGS84 sampling grid (~1 km). Counts describe this
+                # grid, not independent native pixels within 400 m river tiles.
+                "resx": min(0.01, (bbox[2] - bbox[0]) / 2),
+                "resy": min(0.01, (bbox[3] - bbox[1]) / 2),
             },
-            "output": {
-                "format": "JSON",
-                "statistics": ["mean"],
-                "includeInvalidPixels": False
-            }
         }
-
-        response = None
-        exhausted_credential_retries = 0
-        while True:
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self.access_token}",
-            }
-
-            try:
-                response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
-            except requests.exceptions.RequestException as exc:
-                exhausted_credential_retries += 1
-                if exhausted_credential_retries >= retries:
-                    print(f"[Statistics] Statistics request failed after {retries} network attempt(s): {exc}")
-                    return None
-                print(f"[Statistics] Statistics request failed ({exc}); retrying {exhausted_credential_retries + 1}/{retries}.")
-                continue
-
-            if response.status_code == 200:
-                print(f"API Response: {response.status_code}")
-                return response
-
-            if response.status_code == 401:
-                print("[Statistics] Token expired, refreshing...")
+        for attempt in range(retries):
+            if not self.access_token:
                 self.access_token = self.get_access_token()
+            try:
+                response = requests.post(self.api_url, headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json",
+                }, json=payload, timeout=120)
+            except requests.RequestException:
+                if attempt + 1 == retries:
+                    raise RuntimeError("Sentinel-3 network retries exhausted") from None
                 continue
-
-            if response.status_code in (403, 429):
-                if self._switch_to_next_credentials(response.status_code):
-                    continue
-                exhausted_credential_retries += 1
-                if exhausted_credential_retries < retries:
-                    _sleep_with_countdown(
-                        RETRY_DELAY_SECONDS,
-                        f"[Statistics] Request rejected ({response.status_code}) by all configured credentials. "
-                        f"Waiting 3 minutes before retry {exhausted_credential_retries + 1}/{retries}...",
-                    )
-                    continue
-                print(f"[Statistics] Rate limit persisted after {retries} attempts.")
+            if response.status_code == 200:
                 return response
+            if response.status_code == 401:
+                self.access_token = None
+            elif response.status_code == 429 or response.status_code >= 500:
+                if attempt + 1 < retries:
+                    try:
+                        delay = float(response.headers.get("Retry-After", 2 ** attempt))
+                    except ValueError:
+                        delay = 2 ** attempt
+                    time.sleep(min(60, max(0, delay)))
+            else:
+                # Forbidden and malformed requests are not rate limiting.
+                raise RuntimeError(f"Sentinel-3 request rejected: HTTP {response.status_code}")
+        raise RuntimeError(f"Sentinel-3 request retries exhausted: HTTP {response.status_code}")
 
-            print(f"API Response: {response.status_code}")
-            request_id = (
-                response.headers.get("x-request-id")
-                or response.headers.get("x-correlation-id")
-                or response.headers.get("traceparent")
-            )
-            retry_after = response.headers.get("Retry-After")
-            body = (response.text or "").strip()
-            print(
-                "[Statistics] CDSE error response: "
-                f"status={response.status_code}; request_id={request_id or 'not-provided'}; "
-                f"retry_after={retry_after or 'not-provided'}; body={body[:4000] or '<empty>'}"
-            )
-            return response
-
-    def save_data(self):
-        """Retrieve and save statistical data for defined time slots"""
-        image_count = 1
-        output_dir = os.path.join(self.dir, 'statistical_s3')
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        for slot in self.slots:
-            image_count += 1
-            response = self.get_request(self.evalscript, slot, self.bbox)
-
-            if response is None:
-                print("[Statistics] No response received; skipping this slot.")
-                continue
-
-            # Optional: save raw response for debugging?
-            # with open(os.path.join(output_dir, 'last_response.json'), 'w') as json_file:
-            #     json.dump(response.json(), json_file, indent=4)
-
-            if response and response.status_code == 200:
-                values = self.compute_values(response.json())
-                filename = f'{output_dir}/{" - ".join(slot)}_{image_count}.json'
-                with open(filename, 'w') as json_file:
-                    json.dump(values, json_file, indent=4)
-                print(f"Data saved to {filename}")
-
-    def compute_values(self, response_json):
-        results = []
-
-        types = ['mean']
-        for interval in response_json["data"]:
-            date_str = interval["interval"]["from"][:10]  # Extract date in yyyy-mm-dd format
-            # Using same format as S2: dd-mm-yyyy for consistency
-            date_fmt = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%m-%Y")
-
-            outputs = interval.get("outputs", {})
-            data = outputs.get("data", {})
-            bands = data.get("bands", {})
-
-            results_mean = []
-
-            for i in types:
-                # Use S8 stats (Band 0 of output)
-                S07 = bands.get("B0", {}).get("stats", {}).get(i, None)
-
-                # Handle NaN values
-                if any(val in [None, "NaN", float("NaN")] or val is None for val in [S07]):
-                    continue
-
-                # Convert to float
-                S07 = float(S07)
-
-                if S07 == 0.0:
-                    continue
-
-                temperature = S07 - 273.15
-                entry = {
-                    "s3_surface_temperature": temperature,
+    def collect_daily(self, start, end):
+        scenes = self.discover(start, end)
+        if not scenes:
+            payload = {"data": []}
+        else:
+            response = self.get_request(EVALSCRIPT, (start, end), self.bbox)
+            payload = response.json()
+        rows = self.parse_daily(payload, start, end)
+        cursor = date.fromisoformat(start)
+        while cursor <= date.fromisoformat(end):
+            observed = cursor.isoformat()
+            if observed not in scenes and observed not in rows:
+                rows[observed] = {
+                    "collection_status": "unavailable", METRIC: None,
+                    "min_c": None, "max_c": None, "stdev_c": None,
+                    "sample_count": 0, "valid_sample_count": 0,
+                    "quality_flags": ["no_catalogue_scene"],
                 }
+            if observed in rows:
+                rows[observed]["stac_item_ids"] = scenes.get(observed, [])
+            cursor += timedelta(days=1)
+        write_json(self.dir / f"{start}_{end}.json", {"scenes": scenes, "statistics": payload})
+        return rows
 
-                # Store results
-                match i:
-                    case 'mean':
-                        results_mean.append(entry)
+    def discover(self, start, end):
+        """Independent, paginated S3 catalogue query; never consult S2 dates."""
+        url = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
+        query = {
+            "collections": ["sentinel-3-slstr"], "bbox": self.bbox,
+            "datetime": f"{start}T00:00:00Z/{end}T23:59:59Z", "limit": 100,
+        }
+        scenes, seen = {}, set()
+        while True:
+            for attempt in range(3):
+                if not self.access_token:
+                    self.access_token = self.get_access_token()
+                try:
+                    response = requests.post(url, json=query, headers={
+                        "Authorization": f"Bearer {self.access_token}",
+                    }, timeout=60)
+                except requests.RequestException:
+                    if attempt == 2:
+                        raise RuntimeError("Sentinel-3 catalogue network retries exhausted") from None
+                    continue
+                if response.status_code == 200:
+                    break
+                if response.status_code == 401:
+                    self.access_token = None
+                elif response.status_code == 429 or response.status_code >= 500:
+                    time.sleep(2 ** attempt)
+                else:
+                    raise RuntimeError(f"Sentinel-3 catalogue HTTP {response.status_code}")
+            else:
+                raise RuntimeError("Sentinel-3 catalogue retries exhausted")
+            body = response.json()
+            if not isinstance(body.get("features"), list):
+                raise ValueError("Malformed Sentinel-3 catalogue response")
+            for feature in body["features"]:
+                observed = feature["properties"]["datetime"][:10]
+                if not start <= observed <= end:
+                    raise ValueError("Sentinel-3 catalogue date outside requested range")
+                scenes.setdefault(observed, []).append(feature["id"])
+            cursor = body.get("context", {}).get("next")
+            if cursor is None:
+                return {day: sorted(set(ids)) for day, ids in scenes.items()}
+            if str(cursor) in seen:
+                raise ValueError("Repeated Sentinel-3 catalogue cursor")
+            seen.add(str(cursor))
+            query["next"] = cursor
 
-            if results_mean:
-                results.append({
-                    date_fmt: {
-                        "mean": results_mean[0],
-                    }
-                })
-
-        return results
-
-    def make_csv_per_stat(self, json_folder, output_folder):
-        os.makedirs(output_folder, exist_ok=True)
-        data = []
-
-        if os.path.exists(json_folder):
-            for filename in os.listdir(json_folder):
-                if filename.endswith('.json'):
-                    filepath = os.path.join(json_folder, filename)
-                    with open(filepath, 'r') as f:
-                        try:
-                            content = json.load(f)
-                            if isinstance(content, list):
-                                data.extend(content)
-                        except json.JSONDecodeError:
-                            print(f"Error decoding {filename}")
-
-        # Collect all available elements
-        elements = set()
-        for record in data:
-            for date_val, values in record.items():
-                if values.get("mean"):
-                    elements.update(values["mean"].keys())
-
-        elements = sorted(elements)
-
-        # Initialize data containers
-        aggregated_data = {}
-
-        # Fill the data
-        for record in data:
-            for date_val, values in record.items():
-                if date_val not in aggregated_data:
-                     aggregated_data[date_val] = {el: [] for el in elements}
-
-                for el in elements:
-                    val = 0.0
-                    if values.get("mean") and el in values["mean"]:
-                        val = values["mean"][el]
-                    aggregated_data[date_val][el].append(val)
-
-        filename = os.path.join(output_folder, f"s3_mean_metrics.csv")
-        with open(filename, mode="w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["date"] + elements)
-            writer.writeheader()
-
-            sorted_dates = sorted(aggregated_data.keys(), key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
-
-            for d in sorted_dates:
-                row = {"date": d}
-                for el in elements:
-                    vals = aggregated_data[d][el]
-                    row[el] = sum(vals) / len(vals) if vals else 0.0
-                writer.writerow(row)
-
-        print(f"All Sentinel-3 CSV files (mean) saved inside '{output_folder}' folder!")
-
-    def run(self, json_output_folder=None, csv_output_folder=None):
-        """
-        Run the collection pipeline.
-        """
-        if json_output_folder is None:
-            json_output_folder = os.path.join(self.dir, "statistical_s3")
-        if csv_output_folder is None:
-            csv_output_folder = os.path.join(self.dir, "csv")
-
-        # Ensure json output folder matches where save_data writes
-        # save_data writes to self.dir/statistical_s3 currently.
-        # Let's align them.
-        self.save_data() # This writes to self.dir/statistical_s3
-
-        # Now make CSVs
-        self.make_csv_per_stat(json_folder=os.path.join(self.dir, "statistical_s3"), output_folder=csv_output_folder)
+    @staticmethod
+    def parse_daily(payload, start, end):
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("Malformed Sentinel-3 statistics response")
+        rows = {}
+        for item in payload["data"]:
+            if item.get("error"):
+                raise ValueError("Sentinel-3 interval processing failed")
+            observed = date.fromisoformat(item["interval"]["from"][:10]).isoformat()
+            if not start <= observed <= end or observed in rows:
+                raise ValueError("Unexpected/duplicate Sentinel-3 interval")
+            stats = item["outputs"]["data"]["bands"]["B0"]["stats"]
+            sample_count = int(stats["sampleCount"])
+            nodata_count = int(stats["noDataCount"])
+            if sample_count < 0 or not 0 <= nodata_count <= sample_count:
+                raise ValueError("Invalid Sentinel-3 sample counts")
+            valid = sample_count - nodata_count
+            values = {}
+            for name in ("mean", "min", "max", "stDev"):
+                value = stats.get(name)
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    value = None
+                values[name] = value if value is not None and math.isfinite(value) else None
+            if valid and any(value is None for value in values.values()):
+                raise ValueError("Valid Sentinel-3 samples have missing/nonfinite statistics")
+            rows[observed] = {
+                "collection_status": "collected" if valid else "unavailable",
+                METRIC: values["mean"] if valid else None,
+                "min_c": values["min"] if valid else None,
+                "max_c": values["max"] if valid else None,
+                "stdev_c": values["stDev"] if valid else None,
+                "sample_count": sample_count,
+                "valid_sample_count": valid,
+                "quality_flags": ["cloud_mask_not_applied"] + ([] if valid else ["no_valid_samples"]),
+            }
+        # An omitted interval is ambiguous, including an HTTP 200 empty data
+        # array. Leave it retryable instead of declaring archival absence.
+        return rows

@@ -17,7 +17,8 @@ from .credentials import load_local_env_if_present
 from .discovery import CDSEStacDiscovery
 from .models import CollectionRequest, CollectionResult
 from .river_tiles import RiverTileExtractor, RiverTileExtractorConfig
-from .remote_storage import CollectorStorageSettings, CollectorStore, build_aoi_definition
+from .remote_storage import CollectorStorageSettings, CollectorStore, Sentinel3Store, build_aoi_definition
+from .collectors.sentinel3 import Sentinel3Collection
 from .storage import (
     TARGET_COLUMNS,
     CURRENT_COLLECTION_METHOD,
@@ -39,9 +40,11 @@ class CollectionService:
         statistics_factory: Callable[..., Any] = StatisticalCollection,
         tile_extractor_factory: Callable[[RiverTileExtractorConfig], Any] = RiverTileExtractor,
         storage: CollectorStore | None = None,
+        sentinel3_factory: Callable[..., Any] = Sentinel3Collection,
     ):
         self.discovery_factory = discovery_factory or (lambda cloud: CDSEStacDiscovery(max_cloud_coverage=cloud))
         self.statistics_factory = statistics_factory
+        self.sentinel3_factory = sentinel3_factory
         self.tile_extractor_factory = tile_extractor_factory
         self.storage = storage
         self.request: CollectionRequest | None = None
@@ -52,6 +55,8 @@ class CollectionService:
     def collect(self, request: CollectionRequest) -> CollectionResult:
         self.request = request
         self.run_dir = request.output_path / _slugify(request.run_name)
+        if request.sensor == "sentinel3":
+            self.run_dir = self.run_dir / "sentinel3"
         self.log_path = self.run_dir / "logs" / "collector.jsonl"
         if request.dry_run:
             return self._execute()
@@ -62,7 +67,8 @@ class CollectionService:
             load_local_env_if_present()
             aoi_id = request.aoi_id or _slugify(request.run_name)
             self.execution_id = f"collector-run-{utc_now().replace(':', '')}-{uuid.uuid4().hex[:8]}"
-            storage = self.storage or CollectorStore(CollectorStorageSettings.from_env(aoi_id=aoi_id))
+            store_type = Sentinel3Store if request.sensor == "sentinel3" else CollectorStore
+            storage = self.storage or store_type(CollectorStorageSettings.from_env(aoi_id=aoi_id))
             self.storage = storage
             try:
                 storage.initialize()
@@ -214,6 +220,9 @@ class CollectionService:
 
     def _execute(self) -> CollectionResult:
         assert self.request is not None
+        if self.request.sensor == "sentinel3":
+            from .sentinel3_service import execute
+            return execute(self)
         request = self.request
         target_date = request.target_date or date.today().isoformat()
         state, migrated = self._load_state()

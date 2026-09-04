@@ -27,8 +27,11 @@ class CollectionRequest:
     projected_crs: str = "EPSG:32634"
     max_cloud_coverage: int = 30
     publish: bool = True
+    sensor: Literal["sentinel2", "sentinel3"] = "sentinel2"
 
     def __post_init__(self) -> None:
+        if self.sensor not in {"sentinel2", "sentinel3"}:
+            raise ValueError("sensor must be sentinel2 or sentinel3")
         if len(self.aoi_bbox) != 4:
             raise ValueError("aoi_bbox must contain min_lon min_lat max_lon max_lat")
         if self.mode not in {"auto", "backfill", "incremental"}:

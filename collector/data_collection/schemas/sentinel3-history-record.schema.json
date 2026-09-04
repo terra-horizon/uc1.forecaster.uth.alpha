@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Independent Sentinel-3 SLSTR brightness-temperature observation",
+  "type": "object",
+  "required": ["schema_version", "sensor", "tile_id", "observation_date", "bbox",
+    "collection_status", "collection_method", "s3_s8_brightness_temperature_c",
+    "min_c", "max_c", "stdev_c", "sample_count", "valid_sample_count",
+    "stac_item_ids", "quality_flags", "asset_paths"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "sensor": {"const": "sentinel3"},
+    "tile_id": {"type": "string", "minLength": 1},
+    "observation_date": {"type": "string", "format": "date"},
+    "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+    "collection_status": {"enum": ["collected", "unavailable"]},
+    "collection_method": {"const": "slstr_s8_bt_daily_most_recent_v1"},
+    "s3_s8_brightness_temperature_c": {"type": ["number", "null"]},
+    "min_c": {"type": ["number", "null"]},
+    "max_c": {"type": ["number", "null"]},
+    "stdev_c": {"type": ["number", "null"], "minimum": 0},
+    "sample_count": {"type": "integer", "minimum": 0},
+    "valid_sample_count": {"type": "integer", "minimum": 0},
+    "stac_item_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "quality_flags": {"type": "array", "items": {"type": "string"}},
+    "asset_paths": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"collection_status": {"const": "collected"}}},
+     "then": {"properties": {
+       "s3_s8_brightness_temperature_c": {"type": "number"},
+       "valid_sample_count": {"minimum": 1}
+     }},
+     "else": {"properties": {"s3_s8_brightness_temperature_c": {"type": "null"}}}}
+  ]
+}

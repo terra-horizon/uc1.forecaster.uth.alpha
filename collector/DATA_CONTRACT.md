@@ -7,6 +7,29 @@ records in MongoDB.
 
 ## Stable identifiers
 
+Sentinel-3 uses separate MongoDB collections `sentinel3_observations` and
+`sentinel3_collection_state`; the unique observation key remains
+`aoi_id + tile_id + observation_date`. Its local run is nested under
+`<run>/sentinel3/`. MinIO observations/raw responses are stored under
+`terra-uc1/<aoi>/sentinel3/`; the independent state key is
+`terra-uc1/<aoi>/aoi/sentinel3/collection_state.json`.
+The AOI definition and tile geometry remain shared.
+
+The S3 schema is `sentinel3-history-record.schema.json`. It contains
+`s3_s8_brightness_temperature_c`, `min_c`, `max_c`, `stdev_c`,
+sample/valid-sample counts, catalogue scene IDs, processing method, sampling
+grid, native resolution and quality flags. `no_catalogue_scene` denotes
+confirmed absence; `no_valid_samples` denotes a returned interval without
+valid pixels. Missing intervals for catalogued scenes are retryable failures.
+Raw catalogue/statistics JSON is retained locally and, when publishing,
+uploaded with a checksum-addressed key referenced by `raw_artifact`.
+
+S3 chunks are published before their local checkpoint is advanced. Per-tile
+checkpoints recover an interrupted invocation before consolidated history was
+exported. Completeness is calculated from actual terminal tile-days; limiting
+the run cannot falsely declare backfill completion. The existing Sentinel-2
+observation schema and forecaster input fields are unchanged.
+
 - Observation upsert key: `aoi_id + tile_id + observation_date`.
 - AOI identity: stable `aoi_id` from `TERRA_AOI_ID`, plus an
   `aoi_definition_hash` calculated from the AOI bbox, CRS, and tile-generation

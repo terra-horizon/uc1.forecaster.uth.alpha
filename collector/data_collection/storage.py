@@ -94,9 +94,10 @@ def read_json(path: Path, default: Any) -> Any:
 
 
 class HistoryStore:
-    def __init__(self, json_path: Path, csv_path: Path):
+    def __init__(self, json_path: Path, csv_path: Path, columns=HISTORY_COLUMNS):
         self.json_path = json_path
         self.csv_path = csv_path
+        self.columns = columns
 
     def load(self) -> list[dict[str, Any]]:
         value = read_json(self.json_path, [])
@@ -124,13 +125,14 @@ class HistoryStore:
         fd, temporary = tempfile.mkstemp(prefix=f".{self.csv_path.name}.", dir=self.csv_path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=HISTORY_COLUMNS, extrasaction="ignore")
+                writer = csv.DictWriter(handle, fieldnames=self.columns, extrasaction="ignore")
                 writer.writeheader()
                 for record in records:
                     row = dict(record)
-                    for field in ("bbox", "stac_item_ids", "asset_paths", "quality_flags"):
+                    for field in ("bbox", "stac_item_ids", "asset_paths", "quality_flags",
+                                  "sampling_grid_degrees", "raw_artifact"):
                         row[field] = json.dumps(row.get(field), allow_nan=False, separators=(",", ":"), default=_json_default)
-                    writer.writerow({column: row.get(column) for column in HISTORY_COLUMNS})
+                    writer.writerow({column: row.get(column) for column in self.columns})
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.csv_path)
